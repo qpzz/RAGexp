@@ -1,0 +1,59 @@
+{
+  "task": "Integrate user-provided seven directions and twelve subdirections",
+  "sources": [
+    "D:/xiazaifile/Agent后门攻击_七大方向核心必读论文_按时间排序.docx",
+    "E:/AgentBackdoorAttack/Agent后门攻击_七类候选研究方向整理_提问式格式_修订版_2026-09-30.docx",
+    "User supplied detailed direction 2 and three embedded screenshots in current summary"
+  ],
+  "fulltext_directory": "E:\\AgentBackdoorAttack\\report-work\\integration_evidence_2026-10-07",
+  "chapters": {
+    "D1": [
+      32,
+      33,
+      34,
+      35,
+      36,
+      38
+    ],
+    "D2": [
+      28,
+      22,
+      24,
+      27,
+      26
+    ],
+    "D3": [
+      23,
+      41,
+      54,
+      26
+    ],
+    "D4": [
+      16,
+      19,
+      20,
+      21,
+      25,
+      22
+    ],
+    "D5": [
+      22,
+      24,
+      23
+    ],
+    "D6": [
+      12,
+      13,
+      45
+    ],
+    "D7": [
+      48,
+      8,
+      56,
+      25,
+      37
+    ]
+  },
+  "proposals_status": "All proposed mechanisms, attacks, defenses and experiments are untested hypotheses, not findings.",
+  "limitations": "Integration and local fulltext verification; no new comprehensive literature novelty search."
+}

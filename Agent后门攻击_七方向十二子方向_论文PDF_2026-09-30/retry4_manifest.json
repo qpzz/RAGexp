@@ -1,0 +1,98 @@
+[
+  {
+    "number": 10,
+    "name": "Indirect-Prompt-Injection",
+    "citation": "Greshake K, et al. Not What You've Signed Up For: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection. 2023，本报告使用预印本入口。https://arxiv.org/abs/2302.12173",
+    "source_urls": [
+      "https://arxiv.org/abs/2302.12173"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2302.12173"
+    ],
+    "status": "downloaded",
+    "file": "10_Indirect-Prompt-Injection.pdf",
+    "download_url": "https://arxiv.org/pdf/2302.12173",
+    "bytes": 7306999,
+    "sha256": "428e23e8c7e4f89310e113e38d082b3f65548a8b887188ebc536099061800e81"
+  },
+  {
+    "number": 19,
+    "name": "MemoryGraft",
+    "citation": "MemoryGraft: Persistent Compromise of LLM Agents via Poisoned Experience Retrieval. 2025 预印本。https://arxiv.org/abs/2512.16962",
+    "source_urls": [
+      "https://arxiv.org/abs/2512.16962"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2512.16962"
+    ],
+    "status": "downloaded",
+    "file": "19_MemoryGraft.pdf",
+    "download_url": "https://arxiv.org/pdf/2512.16962",
+    "bytes": 5902894,
+    "sha256": "ef4da825ecc960500b6b4b00a3936d6fc30cb95d028b29e5caa4f1f81e4b517e"
+  },
+  {
+    "number": 8,
+    "name": "SleeperNets",
+    "citation": "Rathbun E, Amato C, Oprea A. SleeperNets: Universal Backdoor Poisoning Attacks Against Reinforcement Learning Agents. NeurIPS, 2024。https://proceedings.neurips.cc/paper_files/paper/2024/hash/cb03b5108f1c3a38c990ef0b45bc8b31-Abstract-Conference.html",
+    "source_urls": [
+      "https://proceedings.neurips.cc/paper_files/paper/2024/hash/cb03b5108f1c3a38c990ef0b45bc8b31-Abstract-Conference.html"
+    ],
+    "candidate_pdf_urls": [
+      "https://proceedings.neurips.cc/paper_files/paper/2024/file/cb03b5108f1c3a38c990ef0b45bc8b31-Paper-Conference.pdf"
+    ],
+    "status": "downloaded",
+    "file": "08_SleeperNets.pdf",
+    "download_url": "https://arxiv.org/pdf/2405.20539",
+    "bytes": 7369186,
+    "sha256": "b7327aaf375ba9b2d469bdc88a5e44c6ac9a4c10d973a40650fd04228c1e768c"
+  },
+  {
+    "number": 20,
+    "name": "MemMorph",
+    "citation": "MemMorph: Tool Hijacking in LLM Agents via Memory Poisoning. 2026 预印本，页面注明 under review。https://arxiv.org/abs/2605.26154",
+    "source_urls": [
+      "https://arxiv.org/abs/2605.26154"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2605.26154"
+    ],
+    "status": "downloaded",
+    "file": "20_MemMorph.pdf",
+    "download_url": "https://arxiv.org/pdf/2605.26154",
+    "bytes": 7819553,
+    "sha256": "cd48d3070aabb0f8c92782b43245b3a48a451d0ee35c2a19732fba5d455737b5"
+  },
+  {
+    "number": 56,
+    "name": "Sleeper-Memory-Poisoning",
+    "citation": "Hidden in Memory: Sleeper Memory Poisoning in LLM Agents. 2026 预印本。https://arxiv.org/abs/2605.15338",
+    "source_urls": [
+      "https://arxiv.org/abs/2605.15338"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2605.15338"
+    ],
+    "status": "downloaded",
+    "file": "56_Sleeper-Memory-Poisoning.pdf",
+    "download_url": "https://arxiv.org/pdf/2605.15338",
+    "bytes": 8714199,
+    "sha256": "7d816dd4e468bf1fe688a592f4aa097826d504bf8acec3077fd5b7a679ce011c"
+  },
+  {
+    "number": 37,
+    "name": "BackdoorAgent",
+    "citation": "Feng Y, et al. BackdoorAgent: A Unified Framework for Backdoor Attacks on LLM-based Agents. Findings of ACL, 2026。https://aclanthology.org/2026.findings-acl.791/",
+    "source_urls": [
+      "https://aclanthology.org/2026.findings-acl.791/"
+    ],
+    "candidate_pdf_urls": [
+      "https://aclanthology.org/2026.findings-acl.791.pdf"
+    ],
+    "status": "downloaded",
+    "file": "37_BackdoorAgent.pdf",
+    "download_url": "https://arxiv.org/pdf/2601.04566",
+    "bytes": 31683954,
+    "sha256": "e458de047c074d2cf8f99496e646fdc5e4ed3fa8ae8e69c66b4b9e55de0a3179"
+  }
+]

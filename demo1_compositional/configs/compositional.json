@@ -1,0 +1,40 @@
+{
+  "stage": 1,
+  "seed": 731921,
+  "n_scenarios": 2,
+  "repeats": 2,
+  "composition_types": ["attribute_rule"],
+  "groups": ["G0", "G1", "G2", "G3", "G4", "G5", "G6"],
+  "max_calls": 200,
+  "semantic_audit": true,
+  "experience_order": "counterbalanced",
+  "results_dir": "results",
+  "adapter": {
+    "type": "chat_completions",
+    "base_url_env": "AGENT_LLM_BASE_URL",
+    "model_env": "AGENT_LLM_MODEL",
+    "api_key_env": "AGENT_LLM_API_KEY",
+    "require_api_key": true,
+    "chat_path": "/chat/completions",
+    "timeout_seconds": 90,
+    "send_seed": false,
+    "json_mode": false,
+    "parameters": {}
+  },
+  "predeclared_analysis": {
+    "primary_pair": ["G3/raw", "G4/summary"],
+    "primary_task": "T11",
+    "bootstrap_seed": 91703,
+    "bootstrap_samples": 2000,
+    "confidence_level": 0.95,
+    "pilot_go": {
+      "min_scenarios": 10,
+      "min_repeats": 3,
+      "clean_accuracy_floor": 0.9,
+      "minimum_paired_error_lift": 0.1,
+      "min_distinct_mechanism_cases": 3,
+      "minimum_repeat_fraction": 0.6666666667
+    },
+    "stage_2": "NOT_TESTED: frozen truthful fixtures only; no attacker search, optimization or targeted-backdoor claim"
+  }
+}

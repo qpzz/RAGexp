@@ -1,0 +1,18 @@
+[
+  {
+    "number": 51,
+    "name": "MCP-Guard",
+    "citation": "MCP-Guard: A Multi-Stage Defense-in-Depth Framework for Securing Model Context Protocol in Agentic AI. Findings of ACL, 2026。https://aclanthology.org/2026.findings-acl.240/",
+    "source_urls": [
+      "https://aclanthology.org/2026.findings-acl.240/"
+    ],
+    "candidate_pdf_urls": [
+      "https://aclanthology.org/2026.findings-acl.240.pdf"
+    ],
+    "status": "downloaded",
+    "file": "51_MCP-Guard.pdf",
+    "download_url": "https://arxiv.org/pdf/2508.10991",
+    "bytes": 6167189,
+    "sha256": "d0fce6262226cf03d958ef7b95498f93bde7bcd650a0276f9866062c66ae5e49"
+  }
+]

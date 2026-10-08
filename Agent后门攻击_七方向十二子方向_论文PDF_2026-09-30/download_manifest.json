@@ -1,0 +1,1001 @@
+[
+  {
+    "number": 1,
+    "name": "TrojDRL",
+    "citation": "Kiourti P, Wardega K, Jha S, Li W. TrojDRL: Evaluation of Backdoor Attacks on Deep Reinforcement Learning. DAC, 2020；预印本标题 TrojDRL: Trojan Attacks on Deep Reinforcement Learning Agents，2019。https://open.bu.edu/items/3d852534-ec2f-4dc7-ae87-4a65c373de6e ；https://arxiv.org/abs/1903.06638",
+    "source_urls": [
+      "https://open.bu.edu/items/3d852534-ec2f-4dc7-ae87-4a65c373de6e",
+      "https://arxiv.org/abs/1903.06638"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/1903.06638"
+    ],
+    "status": "downloaded",
+    "file": "01_TrojDRL.pdf",
+    "download_url": "https://arxiv.org/pdf/1903.06638",
+    "bytes": 4998967,
+    "sha256": "d55e302dc47237e04ac4e5fb584abc4598007bcbbd02cdd935e7a3d480caa5d7",
+    "pages": 17,
+    "parse_ok": true,
+    "bibliographic_note": "保存的是 2019 年 arXiv 预印本；对应后续 DAC 2020 工作，预印本与正式版题名不同。"
+  },
+  {
+    "number": 2,
+    "name": "BACKDOORL",
+    "citation": "Wang L, Javed Z, Wu X, et al. BACKDOORL: Backdoor Attack against Competitive Reinforcement Learning. IJCAI, 2021。https://www.ijcai.org/proceedings/2021/509",
+    "source_urls": [
+      "https://www.ijcai.org/proceedings/2021/509"
+    ],
+    "candidate_pdf_urls": [
+      "https://www.ijcai.org/proceedings/2021/0509.pdf"
+    ],
+    "status": "downloaded",
+    "file": "02_BACKDOORL.pdf",
+    "download_url": "https://www.ijcai.org/proceedings/2021/0509.pdf",
+    "bytes": 418965,
+    "sha256": "36760dd1d83f94b21a3e845a48a97a2801cab76cfd39ad93fb44507f043c4c0b",
+    "pages": 7,
+    "parse_ok": true
+  },
+  {
+    "number": 3,
+    "name": "Temporal-Pattern-Backdoor",
+    "citation": "Yu Y, Liu J, Li S, et al. A Temporal-Pattern Backdoor Attack to Deep Reinforcement Learning. 2022 预印本。https://arxiv.org/abs/2205.02589",
+    "source_urls": [
+      "https://arxiv.org/abs/2205.02589"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2205.02589"
+    ],
+    "status": "downloaded",
+    "file": "03_Temporal-Pattern-Backdoor.pdf",
+    "download_url": "https://arxiv.org/pdf/2205.02589",
+    "bytes": 997107,
+    "sha256": "4a25168b464c3c8db7859735b09ec7c7c50ff9768ea758939247107133677ff1",
+    "pages": 6,
+    "parse_ok": true
+  },
+  {
+    "number": 4,
+    "name": "Weight-Poisoning-RIPPLe",
+    "citation": "Kurita K, Michel P, Neubig G. Weight Poisoning Attacks on Pre-trained Models. ACL, 2020。https://aclanthology.org/2020.acl-main.249/",
+    "source_urls": [
+      "https://aclanthology.org/2020.acl-main.249/"
+    ],
+    "candidate_pdf_urls": [
+      "https://aclanthology.org/2020.acl-main.249.pdf"
+    ],
+    "status": "downloaded",
+    "file": "04_Weight-Poisoning-RIPPLe.pdf",
+    "download_url": "https://aclanthology.org/2020.acl-main.249.pdf",
+    "bytes": 648812,
+    "sha256": "825a8ded61ac7714f01e79fe0b47e4f2ea68fa3d7c699d13fab9775a8aa1d99a",
+    "pages": 14,
+    "parse_ok": true
+  },
+  {
+    "number": 5,
+    "name": "BadPre",
+    "citation": "Chen K, Meng Y, Sun X, et al. BadPre: Task-agnostic Backdoor Attacks to Pre-trained NLP Foundation Models. ICLR, 2022；预印本公开于 2021。https://kangjie.me/files/2022_ICLR_BadPre.pdf ；https://arxiv.org/abs/2110.02467",
+    "source_urls": [
+      "https://kangjie.me/files/2022_ICLR_BadPre.pdf",
+      "https://arxiv.org/abs/2110.02467"
+    ],
+    "candidate_pdf_urls": [
+      "https://kangjie.me/files/2022_ICLR_BadPre.pdf",
+      "https://arxiv.org/pdf/2110.02467"
+    ],
+    "status": "downloaded",
+    "file": "05_BadPre.pdf",
+    "download_url": "https://arxiv.org/pdf/2110.02467",
+    "bytes": 1054821,
+    "sha256": "17afb525554063afa054bbe79048c96ab16b31fdd0cb6b9052a7b05c19f587e7",
+    "pages": 8,
+    "parse_ok": true
+  },
+  {
+    "number": 6,
+    "name": "BadPrompt",
+    "citation": "Cai X, Xu H, Xu S, et al. BadPrompt: Backdoor Attacks on Continuous Prompts. NeurIPS, 2022。https://papers.nips.cc/paper_files/paper/2022/file/f0722b58f02d7793acf7d328928f933a-Paper-Conference.pdf",
+    "source_urls": [
+      "https://papers.nips.cc/paper_files/paper/2022/file/f0722b58f02d7793acf7d328928f933a-Paper-Conference.pdf"
+    ],
+    "candidate_pdf_urls": [
+      "https://papers.nips.cc/paper_files/paper/2022/file/f0722b58f02d7793acf7d328928f933a-Paper-Conference.pdf"
+    ],
+    "status": "downloaded",
+    "file": "06_BadPrompt.pdf",
+    "download_url": "https://papers.nips.cc/paper_files/paper/2022/file/f0722b58f02d7793acf7d328928f933a-Paper-Conference.pdf",
+    "bytes": 541519,
+    "sha256": "66e04555e0929c292d9fe2709ad43d9b8d0347f9cbaf00b53c86c6a1e1ce1142",
+    "pages": 13,
+    "parse_ok": true
+  },
+  {
+    "number": 7,
+    "name": "Backdoor-In-Context-Learning",
+    "citation": "Kandpal N, Jagielski M, Tramèr F, Carlini N. Backdoor Attacks for In-Context Learning with Language Models. 2023 预印本。https://arxiv.org/abs/2307.14692",
+    "source_urls": [
+      "https://arxiv.org/abs/2307.14692"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2307.14692"
+    ],
+    "status": "downloaded",
+    "file": "07_Backdoor-In-Context-Learning.pdf",
+    "download_url": "https://arxiv.org/pdf/2307.14692",
+    "bytes": 531761,
+    "sha256": "e4310a9ffa5ccf8ae9e6a0400b1df409c08b21df0b6cf908b3eb516f89f55031",
+    "pages": 11,
+    "parse_ok": true
+  },
+  {
+    "number": 8,
+    "name": "SleeperNets",
+    "citation": "Rathbun E, Amato C, Oprea A. SleeperNets: Universal Backdoor Poisoning Attacks Against Reinforcement Learning Agents. NeurIPS, 2024。https://proceedings.neurips.cc/paper_files/paper/2024/hash/cb03b5108f1c3a38c990ef0b45bc8b31-Abstract-Conference.html",
+    "source_urls": [
+      "https://proceedings.neurips.cc/paper_files/paper/2024/hash/cb03b5108f1c3a38c990ef0b45bc8b31-Abstract-Conference.html"
+    ],
+    "candidate_pdf_urls": [
+      "https://proceedings.neurips.cc/paper_files/paper/2024/file/cb03b5108f1c3a38c990ef0b45bc8b31-Paper-Conference.pdf"
+    ],
+    "status": "downloaded",
+    "file": "08_SleeperNets.pdf",
+    "download_url": "https://arxiv.org/pdf/2405.20539",
+    "bytes": 7369186,
+    "sha256": "b7327aaf375ba9b2d469bdc88a5e44c6ac9a4c10d973a40650fd04228c1e768c",
+    "pages": 23,
+    "parse_ok": true
+  },
+  {
+    "number": 9,
+    "name": "Adversarial-Inception",
+    "citation": "Rathbun E, Oprea A, Amato C. Adversarial Inception Backdoor Attacks against Reinforcement Learning. ICML, 2025。https://proceedings.mlr.press/v267/rathbun25a.html",
+    "source_urls": [
+      "https://proceedings.mlr.press/v267/rathbun25a.html"
+    ],
+    "candidate_pdf_urls": [
+      "https://raw.githubusercontent.com/mlresearch/v267/main/assets/rathbun25a/rathbun25a.pdf"
+    ],
+    "status": "downloaded",
+    "file": "09_Adversarial-Inception.pdf",
+    "download_url": "https://raw.githubusercontent.com/mlresearch/v267/main/assets/rathbun25a/rathbun25a.pdf",
+    "bytes": 3522065,
+    "sha256": "725dd3e8a070a9e24d236b8b66e68872d5492fd6717675a3b4e5b2bfdd41e185",
+    "pages": 24,
+    "parse_ok": true
+  },
+  {
+    "number": 10,
+    "name": "Indirect-Prompt-Injection",
+    "citation": "Greshake K, et al. Not What You've Signed Up For: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection. 2023，本报告使用预印本入口。https://arxiv.org/abs/2302.12173",
+    "source_urls": [
+      "https://arxiv.org/abs/2302.12173"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2302.12173"
+    ],
+    "status": "downloaded",
+    "file": "10_Indirect-Prompt-Injection.pdf",
+    "download_url": "https://arxiv.org/pdf/2302.12173",
+    "bytes": 7306999,
+    "sha256": "428e23e8c7e4f89310e113e38d082b3f65548a8b887188ebc536099061800e81",
+    "pages": 33,
+    "parse_ok": true
+  },
+  {
+    "number": 11,
+    "name": "RAG",
+    "citation": "Lewis P, et al. Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks. NeurIPS, 2020。https://papers.neurips.cc/paper/2020/hash/6b493230205f780e1bc26945df7481e5-Abstract.html",
+    "source_urls": [
+      "https://papers.neurips.cc/paper/2020/hash/6b493230205f780e1bc26945df7481e5-Abstract.html"
+    ],
+    "candidate_pdf_urls": [
+      "https://papers.neurips.cc/paper/2020/file/6b493230205f780e1bc26945df7481e5-Paper.pdf"
+    ],
+    "status": "downloaded",
+    "file": "11_RAG.pdf",
+    "download_url": "https://papers.neurips.cc/paper/2020/file/6b493230205f780e1bc26945df7481e5-Paper.pdf",
+    "bytes": 946122,
+    "sha256": "720f67eb41aa49995d5fcf3d24ac7efe431fbe08ce109b14b5a9fa4d4ebe2f8b",
+    "pages": 16,
+    "parse_ok": true
+  },
+  {
+    "number": 12,
+    "name": "ReAct",
+    "citation": "Yao S, et al. ReAct: Synergizing Reasoning and Acting in Language Models. ICLR, 2023。https://openreview.net/forum?id=WE_vluYUL-X",
+    "source_urls": [
+      "https://openreview.net/forum?id=WE_vluYUL-X"
+    ],
+    "candidate_pdf_urls": [
+      "https://openreview.net/pdf?id=WE_vluYUL-X",
+      "https://arxiv.org/pdf/2210.03629"
+    ],
+    "status": "downloaded",
+    "file": "12_ReAct.pdf",
+    "download_url": "https://arxiv.org/pdf/2210.03629",
+    "bytes": 633805,
+    "sha256": "f285b0971ae4a790e402fb93966bed3adde2cf0a04977d08b2b40d6ab0cace69",
+    "pages": 33,
+    "parse_ok": true
+  },
+  {
+    "number": 13,
+    "name": "Reflexion",
+    "citation": "Shinn N, et al. Reflexion: Language Agents with Verbal Reinforcement Learning. NeurIPS, 2023。https://papers.neurips.cc/paper_files/paper/2023/hash/1b44b878bb782e6954cd888628510e90-Abstract-Conference.html",
+    "source_urls": [
+      "https://papers.neurips.cc/paper_files/paper/2023/hash/1b44b878bb782e6954cd888628510e90-Abstract-Conference.html"
+    ],
+    "candidate_pdf_urls": [
+      "https://papers.neurips.cc/paper_files/paper/2023/file/1b44b878bb782e6954cd888628510e90-Paper-Conference.pdf"
+    ],
+    "status": "downloaded",
+    "file": "13_Reflexion.pdf",
+    "download_url": "https://papers.neurips.cc/paper_files/paper/2023/file/1b44b878bb782e6954cd888628510e90-Paper-Conference.pdf",
+    "bytes": 509025,
+    "sha256": "efba04cd48b779131fc4c3c58ae49e8523ded534f9225a7c57c7bdad0823803d",
+    "pages": 19,
+    "parse_ok": true
+  },
+  {
+    "number": 14,
+    "name": "BadAgent",
+    "citation": "Wang Y, Xue D, Zhang S, Qian S. BadAgent: Inserting and Activating Backdoor Attacks in LLM Agents. ACL, 2024。https://aclanthology.org/2024.acl-long.530/",
+    "source_urls": [
+      "https://aclanthology.org/2024.acl-long.530/"
+    ],
+    "candidate_pdf_urls": [
+      "https://aclanthology.org/2024.acl-long.530.pdf"
+    ],
+    "status": "downloaded",
+    "file": "14_BadAgent.pdf",
+    "download_url": "https://aclanthology.org/2024.acl-long.530.pdf",
+    "bytes": 1355124,
+    "sha256": "4e64ccbf60259fc49720f0f0a495ad29e996197b265729294d70e325776ecbee",
+    "pages": 17,
+    "parse_ok": true
+  },
+  {
+    "number": 15,
+    "name": "BadChain",
+    "citation": "Xiang Z, et al. BadChain: Backdoor Chain-of-Thought Prompting for Large Language Models. ICLR, 2024。https://proceedings.iclr.cc/paper_files/paper/2024/hash/791d3337291b2c574545aeecfa75484c-Abstract-Conference.html",
+    "source_urls": [
+      "https://proceedings.iclr.cc/paper_files/paper/2024/hash/791d3337291b2c574545aeecfa75484c-Abstract-Conference.html"
+    ],
+    "candidate_pdf_urls": [
+      "https://proceedings.iclr.cc/paper_files/paper/2024/file/791d3337291b2c574545aeecfa75484c-Paper-Conference.pdf"
+    ],
+    "status": "downloaded",
+    "file": "15_BadChain.pdf",
+    "download_url": "https://proceedings.iclr.cc/paper_files/paper/2024/file/791d3337291b2c574545aeecfa75484c-Paper-Conference.pdf",
+    "bytes": 5515552,
+    "sha256": "bae3fd4a7f3b2ce765f84b564c73439967b4e91238fea6218569c7046052297a",
+    "pages": 28,
+    "parse_ok": true
+  },
+  {
+    "number": 16,
+    "name": "AgentPoison",
+    "citation": "AgentPoison: Red-teaming LLM Agents via Poisoning Memory or Knowledge Bases. NeurIPS, 2024。https://papers.nips.cc/paper_files/paper/2024/hash/eb113910e9c3f6242541c1652e30dfd6-Abstract-Conference.html",
+    "source_urls": [
+      "https://papers.nips.cc/paper_files/paper/2024/hash/eb113910e9c3f6242541c1652e30dfd6-Abstract-Conference.html"
+    ],
+    "candidate_pdf_urls": [
+      "https://papers.nips.cc/paper_files/paper/2024/file/eb113910e9c3f6242541c1652e30dfd6-Paper-Conference.pdf"
+    ],
+    "status": "downloaded",
+    "file": "16_AgentPoison.pdf",
+    "download_url": "https://papers.nips.cc/paper_files/paper/2024/file/eb113910e9c3f6242541c1652e30dfd6-Paper-Conference.pdf",
+    "bytes": 4114531,
+    "sha256": "c01e3700b63462dafc6f1da7da7349d5db5c49ca4712c5780b313c63fc8a61fb",
+    "pages": 29,
+    "parse_ok": true
+  },
+  {
+    "number": 17,
+    "name": "Watch-Out-for-Your-Agents",
+    "citation": "Yang W, Bi X, Lin Y, et al. Watch Out for Your Agents! Investigating Backdoor Threats to LLM-Based Agents. NeurIPS, 2024。https://proceedings.neurips.cc/paper_files/paper/2024/hash/b6e9d6f4f3428cd5f3f9e9bbae2cab10-Abstract-Conference.html",
+    "source_urls": [
+      "https://proceedings.neurips.cc/paper_files/paper/2024/hash/b6e9d6f4f3428cd5f3f9e9bbae2cab10-Abstract-Conference.html"
+    ],
+    "candidate_pdf_urls": [
+      "https://proceedings.neurips.cc/paper_files/paper/2024/file/b6e9d6f4f3428cd5f3f9e9bbae2cab10-Paper-Conference.pdf"
+    ],
+    "status": "downloaded",
+    "file": "17_Watch-Out-for-Your-Agents.pdf",
+    "download_url": "https://proceedings.neurips.cc/paper_files/paper/2024/file/b6e9d6f4f3428cd5f3f9e9bbae2cab10-Paper-Conference.pdf",
+    "bytes": 1572473,
+    "sha256": "d7f5fe4afb33c59341cc49fe78734ec57f60230c59a0db9d782860d4f2baaedd",
+    "pages": 27,
+    "parse_ok": true
+  },
+  {
+    "number": 18,
+    "name": "MINJA",
+    "citation": "MINJA: Memory Injection Attack on LLM Agents. NeurIPS, 2025。https://proceedings.neurips.cc/paper_files/paper/2025/hash/42a97bbd9844d2bf68596730af80bcdf-Abstract-Conference.html",
+    "source_urls": [
+      "https://proceedings.neurips.cc/paper_files/paper/2025/hash/42a97bbd9844d2bf68596730af80bcdf-Abstract-Conference.html"
+    ],
+    "candidate_pdf_urls": [
+      "https://proceedings.neurips.cc/paper_files/paper/2025/file/42a97bbd9844d2bf68596730af80bcdf-Paper-Conference.pdf"
+    ],
+    "status": "downloaded",
+    "file": "18_MINJA.pdf",
+    "download_url": "https://proceedings.neurips.cc/paper_files/paper/2025/file/42a97bbd9844d2bf68596730af80bcdf-Paper-Conference.pdf",
+    "bytes": 8444801,
+    "sha256": "cf8efceb77e47685584876c63bb1d2245b8a20af2a7dfedaaff12b483ef5be1f",
+    "pages": 35,
+    "parse_ok": true,
+    "bibliographic_note": "原报告的 MINJA 题名为简称；PDF 正式题名：Memory Injection Attacks on LLM Agents via Query-Only Interaction。"
+  },
+  {
+    "number": 19,
+    "name": "MemoryGraft",
+    "citation": "MemoryGraft: Persistent Compromise of LLM Agents via Poisoned Experience Retrieval. 2025 预印本。https://arxiv.org/abs/2512.16962",
+    "source_urls": [
+      "https://arxiv.org/abs/2512.16962"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2512.16962"
+    ],
+    "status": "downloaded",
+    "file": "19_MemoryGraft.pdf",
+    "download_url": "https://arxiv.org/pdf/2512.16962",
+    "bytes": 5902894,
+    "sha256": "ef4da825ecc960500b6b4b00a3936d6fc30cb95d028b29e5caa4f1f81e4b517e",
+    "pages": 14,
+    "parse_ok": true
+  },
+  {
+    "number": 20,
+    "name": "MemMorph",
+    "citation": "MemMorph: Tool Hijacking in LLM Agents via Memory Poisoning. 2026 预印本，页面注明 under review。https://arxiv.org/abs/2605.26154",
+    "source_urls": [
+      "https://arxiv.org/abs/2605.26154"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2605.26154"
+    ],
+    "status": "downloaded",
+    "file": "20_MemMorph.pdf",
+    "download_url": "https://arxiv.org/pdf/2605.26154",
+    "bytes": 7819553,
+    "sha256": "cd48d3070aabb0f8c92782b43245b3a48a451d0ee35c2a19732fba5d455737b5",
+    "pages": 17,
+    "parse_ok": true
+  },
+  {
+    "number": 21,
+    "name": "OEP",
+    "citation": "OEP: Poisoning Self-Evolving LLM Agents via Locally Correct but Non-Transferable Experiences. 2026 预印本。https://arxiv.org/abs/2605.18930",
+    "source_urls": [
+      "https://arxiv.org/abs/2605.18930"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2605.18930"
+    ],
+    "status": "downloaded",
+    "file": "21_OEP.pdf",
+    "download_url": "https://arxiv.org/pdf/2605.18930",
+    "bytes": 1547901,
+    "sha256": "03271fee40e7cff67e502e8b50c6748c38a9954ce6bf17b36ea7958b6839bcd3",
+    "pages": 23,
+    "parse_ok": true
+  },
+  {
+    "number": 22,
+    "name": "MEMOREPAIR",
+    "citation": "MEMOREPAIR: Barrier-First Cascade Repair in Agentic Memory. 2026 预印本。https://arxiv.org/abs/2605.07242",
+    "source_urls": [
+      "https://arxiv.org/abs/2605.07242"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2605.07242"
+    ],
+    "status": "downloaded",
+    "file": "22_MEMOREPAIR.pdf",
+    "download_url": "https://arxiv.org/pdf/2605.07242",
+    "bytes": 835269,
+    "sha256": "820f91a274f7928adf2cbbaff7aadd1ba7e3415fca00b2e1858657031f800f16",
+    "pages": 12,
+    "parse_ok": true
+  },
+  {
+    "number": 23,
+    "name": "TMA-NM",
+    "citation": "Securing LLM-Agent Long-Term Memory Against Poisoning: Non-Malleable, Origin-Bound Authority with Machine-Checked Guarantees. 2026 预印本，本文简称 TMA-NM。https://arxiv.org/abs/2606.24322",
+    "source_urls": [
+      "https://arxiv.org/abs/2606.24322"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2606.24322"
+    ],
+    "status": "downloaded",
+    "file": "23_TMA-NM.pdf",
+    "download_url": "https://arxiv.org/pdf/2606.24322",
+    "bytes": 493253,
+    "sha256": "7a792674eae6dabe59187e6b09bfa515c8d48e0651a1a71a36aec5313afee448",
+    "pages": 12,
+    "parse_ok": true
+  },
+  {
+    "number": 24,
+    "name": "MemTX",
+    "citation": "MemTX: Transactional Belief Commit for Stateful Agent Memory. 2026 预印本。https://arxiv.org/abs/2607.23929",
+    "source_urls": [
+      "https://arxiv.org/abs/2607.23929"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2607.23929"
+    ],
+    "status": "downloaded",
+    "file": "24_MemTX.pdf",
+    "download_url": "https://arxiv.org/pdf/2607.23929",
+    "bytes": 848643,
+    "sha256": "70a55fada7121a5d47fae3185fd09dca18d69826020dcb165323c044c65b1944",
+    "pages": 15,
+    "parse_ok": true
+  },
+  {
+    "number": 25,
+    "name": "MemSecBench",
+    "citation": "MemSecBench: Tracking Agent Memory Poisoning from Persistence to Consequence and Repair. 2026 预印本。https://arxiv.org/abs/2607.27080",
+    "source_urls": [
+      "https://arxiv.org/abs/2607.27080"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2607.27080v1"
+    ],
+    "status": "downloaded",
+    "file": "25_MemSecBench.pdf",
+    "download_url": "https://arxiv.org/pdf/2607.27080v1",
+    "bytes": 3061701,
+    "sha256": "a596c1a913fff9ccd83b0b9844e49d9629cfd339e28a058b8e575abd774c14ab",
+    "pages": 28,
+    "parse_ok": true
+  },
+  {
+    "number": 26,
+    "name": "Revoked-but-Still-Authoritative",
+    "citation": "Revoked but Still Authoritative: An Empirical Study of Revocation Enforcement in Agent-Memory Systems. 2026 预印本。https://arxiv.org/abs/2609.08258",
+    "source_urls": [
+      "https://arxiv.org/abs/2609.08258"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2609.08258"
+    ],
+    "status": "downloaded",
+    "file": "26_Revoked-but-Still-Authoritative.pdf",
+    "download_url": "https://arxiv.org/pdf/2609.08258",
+    "bytes": 460448,
+    "sha256": "3596c76611a32b4a5cfe803e26dff7ba4134504099f0fb9e8dafe747587e81c9",
+    "pages": 20,
+    "parse_ok": true
+  },
+  {
+    "number": 27,
+    "name": "Forgetting-Without-Restarting",
+    "citation": "Forgetting Without Restarting: Execution-State Unlearning for Stateful LLM Agents. 2026 预印本。https://arxiv.org/abs/2609.04875",
+    "source_urls": [
+      "https://arxiv.org/abs/2609.04875"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2609.04875"
+    ],
+    "status": "downloaded",
+    "file": "27_Forgetting-Without-Restarting.pdf",
+    "download_url": "https://arxiv.org/pdf/2609.04875",
+    "bytes": 1559385,
+    "sha256": "b419c1cc1a1bdc505cff0ec7889b435b529d5d5c7ad40b4e8311fa9d871cc79f",
+    "pages": 8,
+    "parse_ok": true
+  },
+  {
+    "number": 28,
+    "name": "Prompt-Infection",
+    "citation": "Lee D, Tiwari M. Prompt Infection: LLM-to-LLM Prompt Injection within Multi-Agent Systems. 2024 预印本。https://arxiv.org/abs/2410.07283",
+    "source_urls": [
+      "https://arxiv.org/abs/2410.07283"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2410.07283v1"
+    ],
+    "status": "downloaded",
+    "file": "28_Prompt-Infection.pdf",
+    "download_url": "https://arxiv.org/pdf/2410.07283v1",
+    "bytes": 3617894,
+    "sha256": "9b2c2c3a11c03fbdd8fce1eb23cc34d2a000b2d3ca1a297f508ea8a75e18b512",
+    "pages": 14,
+    "parse_ok": true
+  },
+  {
+    "number": 29,
+    "name": "Flooding-Manipulated-Knowledge",
+    "citation": "Flooding Spread of Manipulated Knowledge in LLM-Based Multi-Agent Communities. 2024 预印本。https://arxiv.org/abs/2407.07791",
+    "source_urls": [
+      "https://arxiv.org/abs/2407.07791"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2407.07791v1"
+    ],
+    "status": "downloaded",
+    "file": "29_Flooding-Manipulated-Knowledge.pdf",
+    "download_url": "https://arxiv.org/pdf/2407.07791v1",
+    "bytes": 3579836,
+    "sha256": "b5ae2a376c8ee124f6cbec36c72f26c6fac8cb621afa4751e8c9c2710a404240",
+    "pages": 18,
+    "parse_ok": true
+  },
+  {
+    "number": 30,
+    "name": "AiTM-Communication-Attacks",
+    "citation": "He P, Lin Y, et al. Red-Teaming LLM Multi-Agent Systems via Communication Attacks. Findings of ACL, 2025。https://aclanthology.org/2025.findings-acl.349/",
+    "source_urls": [
+      "https://aclanthology.org/2025.findings-acl.349/"
+    ],
+    "candidate_pdf_urls": [
+      "https://aclanthology.org/2025.findings-acl.349.pdf"
+    ],
+    "status": "downloaded",
+    "file": "30_AiTM-Communication-Attacks.pdf",
+    "download_url": "https://aclanthology.org/2025.findings-acl.349.pdf",
+    "bytes": 832323,
+    "sha256": "b661ff548b886c49ba77a614ecf1fbaaa75ad54c99a69ebb50da67d7176d588b",
+    "pages": 22,
+    "parse_ok": true
+  },
+  {
+    "number": 31,
+    "name": "PlanFlip",
+    "citation": "PlanFlip: Attacking Multi-Agent LLM Systems via Planning-Phase Prompt Injection. 2026 预印本；页面日期异常见正文核查说明。https://arxiv.org/abs/2607.16199",
+    "source_urls": [
+      "https://arxiv.org/abs/2607.16199"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2607.16199"
+    ],
+    "status": "downloaded",
+    "file": "31_PlanFlip.pdf",
+    "download_url": "https://arxiv.org/pdf/2607.16199",
+    "bytes": 644142,
+    "sha256": "9acb402e1f9a9e92061d8a41a7041040e97092084ded2363d664bba81249b26b",
+    "pages": 27,
+    "parse_ok": true
+  },
+  {
+    "number": 32,
+    "name": "InjecAgent",
+    "citation": "InjecAgent: Benchmarking Indirect Prompt Injections in Tool-Integrated Large Language Model Agents. Findings of ACL, 2024。https://aclanthology.org/2024.findings-acl.624/",
+    "source_urls": [
+      "https://aclanthology.org/2024.findings-acl.624/"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2403.02691"
+    ],
+    "status": "downloaded",
+    "file": "32_InjecAgent.pdf",
+    "download_url": "https://arxiv.org/pdf/2403.02691",
+    "bytes": 3183277,
+    "sha256": "49e6e6a4a00c797a772ef905a154c0839426655027d5fa0ce6b632e6c1db2bfb",
+    "pages": 36,
+    "parse_ok": true
+  },
+  {
+    "number": 33,
+    "name": "AgentDojo",
+    "citation": "AgentDojo: A Dynamic Environment to Evaluate Prompt Injection Attacks and Defenses for LLM Agents. NeurIPS Datasets and Benchmarks, 2024。https://proceedings.neurips.cc/paper_files/paper/2024/hash/97091a5177d8dc64b1da8bf3e1f6fb54-Abstract-Datasets_and_Benchmarks_Track.html",
+    "source_urls": [
+      "https://proceedings.neurips.cc/paper_files/paper/2024/hash/97091a5177d8dc64b1da8bf3e1f6fb54-Abstract-Datasets_and_Benchmarks_Track.html"
+    ],
+    "candidate_pdf_urls": [
+      "https://proceedings.neurips.cc/paper_files/paper/2024/file/97091a5177d8dc64b1da8bf3e1f6fb54-Paper-Datasets_and_Benchmarks_Track.pdf"
+    ],
+    "status": "downloaded",
+    "file": "33_AgentDojo.pdf",
+    "download_url": "https://proceedings.neurips.cc/paper_files/paper/2024/file/97091a5177d8dc64b1da8bf3e1f6fb54-Paper-Datasets_and_Benchmarks_Track.pdf",
+    "bytes": 900328,
+    "sha256": "26a3f0426ee1d533e4dd9f62d1343a7a1d231fe718cfaf3a362cc7de829ae913",
+    "pages": 26,
+    "parse_ok": true
+  },
+  {
+    "number": 34,
+    "name": "MCPTox",
+    "citation": "MCPTox: A Benchmark for Tool Poisoning on Real-World MCP Servers. AAAI, 2026；2025 年已有预印本。https://ojs.aaai.org/index.php/AAAI/article/view/40895",
+    "source_urls": [
+      "https://ojs.aaai.org/index.php/AAAI/article/view/40895"
+    ],
+    "candidate_pdf_urls": [
+      "https://ojs.aaai.org/index.php/AAAI/article/download/40895/44856"
+    ],
+    "status": "downloaded",
+    "file": "34_MCPTox.pdf",
+    "download_url": "https://ojs.aaai.org/index.php/AAAI/article/download/40895/44856",
+    "bytes": 1147189,
+    "sha256": "9aa84895de698748cbdd75f615832acdde29ceaa81e8d5f7c51337e170be162b",
+    "pages": 9,
+    "parse_ok": true
+  },
+  {
+    "number": 35,
+    "name": "MCP-ITP",
+    "citation": "MCP-ITP: An Automated Framework for Implicit Tool Poisoning in MCP. 2026 预印本。https://arxiv.org/abs/2601.07395",
+    "source_urls": [
+      "https://arxiv.org/abs/2601.07395"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2601.07395"
+    ],
+    "status": "downloaded",
+    "file": "35_MCP-ITP.pdf",
+    "download_url": "https://arxiv.org/pdf/2601.07395",
+    "bytes": 675691,
+    "sha256": "a6ba5b83e0bf796f8ba60975860dcf2103f456bfac1cdc928bb989009b8c9b7e",
+    "pages": 14,
+    "parse_ok": true
+  },
+  {
+    "number": 36,
+    "name": "GhostSplice",
+    "citation": "Measuring and Exploiting Implicit Trust in LLM Tool-Calling Pipelines. 2026 预印本，公开披露名 GhostSplice。https://arxiv.org/abs/2609.18217",
+    "source_urls": [
+      "https://arxiv.org/abs/2609.18217"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2609.18217"
+    ],
+    "status": "downloaded",
+    "file": "36_GhostSplice.pdf",
+    "download_url": "https://arxiv.org/pdf/2609.18217",
+    "bytes": 2320881,
+    "sha256": "883d29571663cdf1fa339acb99626ca303f2c9521763599bc86e8a606b2c3d86",
+    "pages": 16,
+    "parse_ok": true
+  },
+  {
+    "number": 37,
+    "name": "BackdoorAgent",
+    "citation": "Feng Y, et al. BackdoorAgent: A Unified Framework for Backdoor Attacks on LLM-based Agents. Findings of ACL, 2026。https://aclanthology.org/2026.findings-acl.791/",
+    "source_urls": [
+      "https://aclanthology.org/2026.findings-acl.791/"
+    ],
+    "candidate_pdf_urls": [
+      "https://aclanthology.org/2026.findings-acl.791.pdf"
+    ],
+    "status": "downloaded",
+    "file": "37_BackdoorAgent.pdf",
+    "download_url": "https://arxiv.org/pdf/2601.04566",
+    "bytes": 31683954,
+    "sha256": "e458de047c074d2cf8f99496e646fdc5e4ed3fa8ae8e69c66b4b9e55de0a3179",
+    "pages": 17,
+    "parse_ok": true
+  },
+  {
+    "number": 38,
+    "name": "ShieldMCP",
+    "citation": "Securing the Tool Layer: A Threat Taxonomy and Runtime Defense Framework for Model Context Protocol Deployments. ACL Industry Track, 2026，文中方法 ShieldMCP。https://aclanthology.org/2026.acl-industry.58/",
+    "source_urls": [
+      "https://aclanthology.org/2026.acl-industry.58/"
+    ],
+    "candidate_pdf_urls": [
+      "https://aclanthology.org/2026.acl-industry.58.pdf"
+    ],
+    "status": "downloaded",
+    "file": "38_ShieldMCP.pdf",
+    "download_url": "https://aclanthology.org/2026.acl-industry.58.pdf",
+    "bytes": 168510,
+    "sha256": "858b16716563a652eac125addf1a98e15d1950a324a3ddfbd1813c7ab0022295",
+    "pages": 7,
+    "parse_ok": true
+  },
+  {
+    "number": 39,
+    "name": "Mandela-Effect",
+    "citation": "When Agents “Misremember” Collectively: Exploring the Mandela Effect in LLM-based Multi-Agent Systems. 2026，arXiv 页面注明 ICLR 2026。https://arxiv.org/abs/2602.00428",
+    "source_urls": [
+      "https://arxiv.org/abs/2602.00428"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2602.00428"
+    ],
+    "status": "downloaded",
+    "file": "39_Mandela-Effect.pdf",
+    "download_url": "https://arxiv.org/pdf/2602.00428",
+    "bytes": 1171151,
+    "sha256": "88e563ca779033a1dc595a9cdf0582dfd3aa145fc558023ec526dbaff2bf5c33",
+    "pages": 30,
+    "parse_ok": true
+  },
+  {
+    "number": 40,
+    "name": "CAMA",
+    "citation": "Beyond Memory Majority: Latent-Source Reasoning for Multi-Agent Memory Arbitration. 2026 预印本，方法 CAMA。https://arxiv.org/abs/2608.19701",
+    "source_urls": [
+      "https://arxiv.org/abs/2608.19701"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2608.19701"
+    ],
+    "status": "downloaded",
+    "file": "40_CAMA.pdf",
+    "download_url": "https://arxiv.org/pdf/2608.19701",
+    "bytes": 557576,
+    "sha256": "881f76a3bb2564bff24ee1104ce8d43b767a89a07061f1ccb5b47a8e6d55eaaf",
+    "pages": 15,
+    "parse_ok": true
+  },
+  {
+    "number": 41,
+    "name": "CPB",
+    "citation": "A Benchmark and Diagnostic Study of Epistemic Admission in Shared Agent Memory. 2026-09-25 预印本，基准 CPB。https://arxiv.org/abs/2609.30813",
+    "source_urls": [
+      "https://arxiv.org/abs/2609.30813"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2609.30813"
+    ],
+    "status": "downloaded",
+    "file": "41_CPB.pdf",
+    "download_url": "https://arxiv.org/pdf/2609.30813",
+    "bytes": 580648,
+    "sha256": "7bd3834f9c92729814a4b14e2a0c9918f8e92aa0f71282d36953882363283084",
+    "pages": 34,
+    "parse_ok": true
+  },
+  {
+    "number": 42,
+    "name": "Silence-Is-Endorsement",
+    "citation": "Silence Is Endorsement: Verification-Status Laundering in LLM Agent Pipelines. 2026 预印本。https://arxiv.org/abs/2609.20211",
+    "source_urls": [
+      "https://arxiv.org/abs/2609.20211"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2609.20211"
+    ],
+    "status": "downloaded",
+    "file": "42_Silence-Is-Endorsement.pdf",
+    "download_url": "https://arxiv.org/pdf/2609.20211",
+    "bytes": 428858,
+    "sha256": "47a89328410d5b4e60aea753f0de0a466cc5a0020e5a0abdcc2c19981f8b0633",
+    "pages": 22,
+    "parse_ok": true
+  },
+  {
+    "number": 43,
+    "name": "Authorization-Revocation",
+    "citation": "Authorization Revocation for Long-Running AI Agents: Root-Scoped Quiescence under Delegation and Asynchronous Execution. 2026 预印本。https://arxiv.org/abs/2609.21284",
+    "source_urls": [
+      "https://arxiv.org/abs/2609.21284"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2609.21284"
+    ],
+    "status": "downloaded",
+    "file": "43_Authorization-Revocation.pdf",
+    "download_url": "https://arxiv.org/pdf/2609.21284",
+    "bytes": 672986,
+    "sha256": "9c00c4fc6f5a112b5551ba94f843df468d6056e522e0b3325180e824ac4c0b95",
+    "pages": 39,
+    "parse_ok": true
+  },
+  {
+    "number": 44,
+    "name": "From-Approval-to-Execution",
+    "citation": "From Approval to Execution: Reconstruction-Aware Repair Analysis for LLM-Agent Software. 2026 预印本。https://arxiv.org/abs/2609.26529",
+    "source_urls": [
+      "https://arxiv.org/abs/2609.26529"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2609.26529"
+    ],
+    "status": "downloaded",
+    "file": "44_From-Approval-to-Execution.pdf",
+    "download_url": "https://arxiv.org/pdf/2609.26529",
+    "bytes": 2243771,
+    "sha256": "3e302119d47628b900ce56eaf602daf14e393a30b85b8504198c6b266a9cc992",
+    "pages": 18,
+    "parse_ok": true
+  },
+  {
+    "number": 45,
+    "name": "Verified-Tool-Calls",
+    "citation": "Verified Tool Calls Improve LLM Agent Reliability Under Non-Atomic Failures. 2026 预印本。https://arxiv.org/abs/2608.02645",
+    "source_urls": [
+      "https://arxiv.org/abs/2608.02645"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2608.02645"
+    ],
+    "status": "downloaded",
+    "file": "45_Verified-Tool-Calls.pdf",
+    "download_url": "https://arxiv.org/pdf/2608.02645",
+    "bytes": 428545,
+    "sha256": "dee29b0250eb6d40677b1477184662073d995053f28ae111a98dc83b759b74ac",
+    "pages": 12,
+    "parse_ok": true
+  },
+  {
+    "number": 46,
+    "name": "Microsoft-MCP-Docs",
+    "citation": "Microsoft. Using MCP tools with Agents. 官方开发文档，字段消费策略与 Host 保留行为。https://learn.microsoft.com/en-us/agent-framework/agents/tools/local-mcp-tools",
+    "source_urls": [
+      "https://learn.microsoft.com/en-us/agent-framework/agents/tools/local-mcp-tools"
+    ],
+    "candidate_pdf_urls": [],
+    "status": "non-paper"
+  },
+  {
+    "number": 47,
+    "name": "MemGPT",
+    "citation": "Packer C, et al. MemGPT: Towards LLMs as Operating Systems. 2023 预印本。https://arxiv.org/abs/2310.08560",
+    "source_urls": [
+      "https://arxiv.org/abs/2310.08560"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2310.08560"
+    ],
+    "status": "downloaded",
+    "file": "47_MemGPT.pdf",
+    "download_url": "https://arxiv.org/pdf/2310.08560",
+    "bytes": 663708,
+    "sha256": "9f674bcff69c86f11c813dcfad613d8841f5f8ed17979e3c4df06a91df7762e0",
+    "pages": 13,
+    "parse_ok": true
+  },
+  {
+    "number": 48,
+    "name": "Sleeper-Agents",
+    "citation": "Hubinger E, et al. Sleeper Agents: Training Deceptive LLMs that Persist Through Safety Training. 2024 预印本。https://arxiv.org/abs/2401.05566",
+    "source_urls": [
+      "https://arxiv.org/abs/2401.05566"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2401.05566"
+    ],
+    "status": "downloaded",
+    "file": "48_Sleeper-Agents.pdf",
+    "download_url": "https://arxiv.org/pdf/2401.05566",
+    "bytes": 3696766,
+    "sha256": "988e62785a47533775a543c78415dd0994341987f3124d57a81f46c931227bed",
+    "pages": 71,
+    "parse_ok": true
+  },
+  {
+    "number": 49,
+    "name": "Spotlighting",
+    "citation": "Defending Against Indirect Prompt Injection Attacks With Spotlighting. 2024 预印本。https://arxiv.org/abs/2403.14720",
+    "source_urls": [
+      "https://arxiv.org/abs/2403.14720"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2403.14720"
+    ],
+    "status": "downloaded",
+    "file": "49_Spotlighting.pdf",
+    "download_url": "https://arxiv.org/pdf/2403.14720",
+    "bytes": 383223,
+    "sha256": "8c57c6da480eb46c0deaec1f34dfd98fc75810bd352d4391c6f423430774877d",
+    "pages": 8,
+    "parse_ok": true
+  },
+  {
+    "number": 50,
+    "name": "CaMeL",
+    "citation": "Defeating Prompt Injections by Design. 2025 预印本；CaMeL，SaTML 2026 官方日程收录。https://arxiv.org/abs/2503.18813 ；https://satml.org/2026/program/",
+    "source_urls": [
+      "https://arxiv.org/abs/2503.18813",
+      "https://satml.org/2026/program/"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2503.18813"
+    ],
+    "status": "downloaded",
+    "file": "50_CaMeL.pdf",
+    "download_url": "https://arxiv.org/pdf/2503.18813",
+    "bytes": 5531468,
+    "sha256": "c3719f6ce73eecf45e3764debef8a3d8ff8c9233b37d128c558b694ec3790cc7",
+    "pages": 125,
+    "parse_ok": true
+  },
+  {
+    "number": 51,
+    "name": "MCP-Guard",
+    "citation": "MCP-Guard: A Multi-Stage Defense-in-Depth Framework for Securing Model Context Protocol in Agentic AI. Findings of ACL, 2026。https://aclanthology.org/2026.findings-acl.240/",
+    "source_urls": [
+      "https://aclanthology.org/2026.findings-acl.240/"
+    ],
+    "candidate_pdf_urls": [
+      "https://aclanthology.org/2026.findings-acl.240.pdf"
+    ],
+    "status": "downloaded",
+    "file": "51_MCP-Guard.pdf",
+    "download_url": "https://arxiv.org/pdf/2508.10991",
+    "bytes": 6167189,
+    "sha256": "d0fce6262226cf03d958ef7b95498f93bde7bcd650a0276f9866062c66ae5e49",
+    "pages": 14,
+    "parse_ok": true
+  },
+  {
+    "number": 52,
+    "name": "MCP-SafetyBench",
+    "citation": "MCP-SafetyBench: A Benchmark for Safety Evaluation of Large Language Models with Real-World MCP Servers. ICLR, 2026。https://proceedings.iclr.cc/paper_files/paper/2026/hash/d46f127a80dc58cbc0732a717285c43a-Abstract-Conference.html",
+    "source_urls": [
+      "https://proceedings.iclr.cc/paper_files/paper/2026/hash/d46f127a80dc58cbc0732a717285c43a-Abstract-Conference.html"
+    ],
+    "candidate_pdf_urls": [
+      "https://proceedings.iclr.cc/paper_files/paper/2026/file/d46f127a80dc58cbc0732a717285c43a-Paper-Conference.pdf"
+    ],
+    "status": "downloaded",
+    "file": "52_MCP-SafetyBench.pdf",
+    "download_url": "https://proceedings.iclr.cc/paper_files/paper/2026/file/d46f127a80dc58cbc0732a717285c43a-Paper-Conference.pdf",
+    "bytes": 6821954,
+    "sha256": "32aeb15d673d5b999155938a367c8d66d8640dd9b66dfc015ea5e91ec6ef5a0f",
+    "pages": 23,
+    "parse_ok": true
+  },
+  {
+    "number": 53,
+    "name": "VSCode-Issue",
+    "citation": "Microsoft VS Code. Issue 290063. 官方项目中的 MCP 结果消费差异问题记录；属于实现证据，不是已确认后门攻击论文。https://github.com/microsoft/vscode/issues/290063",
+    "source_urls": [
+      "https://github.com/microsoft/vscode/issues/290063"
+    ],
+    "candidate_pdf_urls": [],
+    "status": "non-paper"
+  },
+  {
+    "number": 54,
+    "name": "Selective-Revalidation",
+    "citation": "From Version Conflicts to Decision Conflicts: Selective Revalidation for Long-Running AI Agents. 2026 预印本。https://arxiv.org/abs/2609.08015",
+    "source_urls": [
+      "https://arxiv.org/abs/2609.08015"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2609.08015"
+    ],
+    "status": "downloaded",
+    "file": "54_Selective-Revalidation.pdf",
+    "download_url": "https://arxiv.org/pdf/2609.08015",
+    "bytes": 536606,
+    "sha256": "3fced8db2ce3ecb9a02214811efdeb506a236b2fe5f9589ad4e35d9ef9f73a42",
+    "pages": 6,
+    "parse_ok": true
+  },
+  {
+    "number": 55,
+    "name": "Zombie-Agents",
+    "citation": "Zombie Agents: Persistent Control of Self-Evolving LLM Agents via Self-Reinforcing Injections. 2026；arXiv 页面注明发表于 Lifelong Agent @ ICLR 2026 Workshop，不是 ICLR 主会论文。https://arxiv.org/abs/2602.15654",
+    "source_urls": [
+      "https://arxiv.org/abs/2602.15654"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2602.15654"
+    ],
+    "status": "downloaded",
+    "file": "55_Zombie-Agents.pdf",
+    "download_url": "https://arxiv.org/pdf/2602.15654",
+    "bytes": 804670,
+    "sha256": "7a00d1a2e132c0155dfc383490ec142fc42f007d867bd491462dd2745e0e1468",
+    "pages": 14,
+    "parse_ok": true
+  },
+  {
+    "number": 56,
+    "name": "Sleeper-Memory-Poisoning",
+    "citation": "Hidden in Memory: Sleeper Memory Poisoning in LLM Agents. 2026 预印本。https://arxiv.org/abs/2605.15338",
+    "source_urls": [
+      "https://arxiv.org/abs/2605.15338"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2605.15338"
+    ],
+    "status": "downloaded",
+    "file": "56_Sleeper-Memory-Poisoning.pdf",
+    "download_url": "https://arxiv.org/pdf/2605.15338",
+    "bytes": 8714199,
+    "sha256": "7d816dd4e468bf1fe688a592f4aa097826d504bf8acec3077fd5b7a679ce011c",
+    "pages": 86,
+    "parse_ok": true
+  }
+]

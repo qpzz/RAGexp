@@ -1,0 +1,1450 @@
+--- PAGE 1 ---
+A Benchmark and Diagnostic Study of
+Epistemic Admission in Shared Agent Memory
+Xiaoyang Li1, Yiqi Wang1, Chencheng Zhu2, Ke Xu3, Wencheng Yang1,
+Zequn Sun4, Pingan Song1, Yiqun Duan5, Taotao Cai1
+1University of Southern Queensland 2University of New South Wales 3Aikaier
+4Nanjing University 5Facebook
+September 2026
+Abstract
+Evaluating claim admission in shared agent memory is challenging because repeated claims may be
+mistaken for independent evidence. An agent may copy or paraphrase a retrieved belief, while admit-
+ting a false claim exposes subsequent agents to it. To study this problem, we introduce the Correlated
+Promotion Benchmark (CPB), which evaluates whether candidate claims should be admitted to shared
+memory CPB-Static constructs a frozen test split from publicly annotated sources with fixed gold actions.
+CPB-Live runs multi-agent teams over a shared store, records all writes and retrievals, and tracks source
+lineage defined by each scenario. A separate consumer answers from the store alone. We evaluate eight
+admission policies across four agent families. Our results show that policies which deduplicate sources
+reject many true claims alongside false ones, whereas policies preserving answer coverage admit nearly
+as many false claims as unrestricted sharing. Gating on declared source type reduces false adoption
+to 0.06–0.09, compared with 0.22–0.47 for other answering policies. Once an uncontested false belief
+enters memory, the consumer asserts it in 0.97–0.99 of probes across all families. No non-oracle policy
+consistently rejects false claims across verbatim copies, paraphrases, and paraphrases declared authori-
+tative. These findings reveal the limitations of admission policies without access to source lineage.
+1 Introduction
+Shared agent memory poses two problems single-agent memory does not. An agent that restates a retrieved
+belief adds agreement without independent evidence, which can reinforce false beliefs and yield spurious
+majorities (Xu et al., 2026; Lin et al., 2026; Qi et al., 2026), and the cost of an error grows with the team that
+later reads it (Rahman et al., 2026; Papadopoulos et al., 2026). Existing benchmarks rarely hold conflicting
+or unequally reliable evidence (Singh, 2026), and no fixed corpus can measure the feedback between admis-
+sion, retrieval and later writes. That takes a running system with logged retrieval and source lineage fixed
+independently of the policy.
+The problem is not hypothetical. Agent frameworks ship shared memory tiers with provenance and access
+control (Rezazadeh et al., 2025; Margalit et al., 2026; Sidik and Rokach, 2026; Ren et al., 2026), a deployed
+layer deduplicates on every write (Chhikara et al., 2025), admission is defended by consistency checks, rules
+over correlated traces or declared derivation (Wei et al., 2025; Qi et al., 2026; Li et al., 2026b), one injected
+memory steers the agents that read it (Chen et al., 2024; Dong et al., 2025), and agreement among copying
+sources carries no evidence (Dong et al., 2009b; 2010). None of these measures what an admitted falsehood
+does once agents read, restate and write it back.
+1
+arXiv:2609.30813v1  [cs.AI]  25 Sep 2026
+
+--- PAGE 2 ---
+We introduce the Correlated Promotion Benchmark, CPB. CPB-Static combines verdicts from public anno-
+tated sources with an authored multi-agent envelope and scores policies at scale against a fixed gold action.
+CPB-Live runs a team over a shared store that logs every write and retrieval, with lineage fixed by the
+scenario, exposure read from the log and adoption graded from consumer answers, so the consequence of
+admitting a claim is observed rather than assumed (Dong et al., 2009b; Qi et al., 2026; Lin et al., 2026).
+Across voting, lineage-collapse, confidence, source-type and judge policies on four agent families, three
+patterns recur. Consumers relying only on shared memory almost always repeat an uncontested false belief.
+Policies that refuse copies refuse most true claims with them, policies that answer admit most of what share-
+all admits, the judges that filter halve damage at best, and the one rule between them gates on a source-type
+field.
+Three contributions follow.
+An instrument:CPB, an assembly protocol over public annotated sources with its adapters, gold-action
+mapping and frozen test split, and CPB-Live, a running team over a store that logs every write and retrieval,
+so that exposure and adoption are observed after each admission and lineage is fixed by the scenario rather
+than inferred by the policy.
+A diagnosis of admission mechanisms:on four agent families, reimplemented voting, collapse and judge
+mechanisms and components from Mem0 and A-MemGuard admit false claims under rewording or author-
+itative source typing, and only the governance rule, a source-type gate, keeps false adoption low while still
+answering.
+Measurements of the store itself:how often a consumer adopts a false shared belief, what a competing
+truth changes, and how rewording and arrival order move admission, whichever mechanism is preferred.
+2 Related Work
+Copy-aware truth discovery.DEPEN discounts the vote of a source identified as a copier, and later work
+extends the model to update histories, complex copying and correlated fusion (Dong et al., 2009a;b; 2010;
+Pochampally et al., 2014), all inferring copying from statistical agreement since derivation is not observed.
+Admission to agent memory.Single-writer systems gate entry by factual support, self-consistency, utility
+or transition faithfulness, or choose among persisting, verifying and asking (Zhang and Li, 2026; Zhang
+et al., 2026; Li et al., 2026a; Xiao et al., 2026; Yang et al., 2026; Hu et al., 2026; Latimer et al., 2025),
+without modelling a shared tier and its readers. Learning to Share admits entries to a memory shared across
+teams by learned utility (Fioresi et al., 2026), other systems supply shared tiers, provenance, access control
+and governance primitives (Rezazadeh et al., 2025; Margalit et al., 2026; Ren et al., 2026; Sidik and Rokach,
+2026; Han et al., 2026; Zhang et al., 2025; Wu et al., 2026; Bhardwaj et al., 2026; Ding et al., 2026; Wang
+et al., 2026), and selection for shared institutional state has been framed as governance (Cuadros et al.,
+2026). GovMem discounts correlated traces under synthetic or inferred dependencies and specifies its harm
+experiment without executing it (Qi et al., 2026), MemTX commits beliefs over a writer-declared derivation
+graph with rollback (Li et al., 2026b), CAMA decouples correlated memories at retrieval and names the
+write-back loop without mitigating it (Lin et al., 2026), and poisoning defences target adversarial injection
+(Wei et al., 2025; Chen et al., 2024; Dong et al., 2025). Mem0’s write path and A-MemGuard’s consistency
+check run inside CPB-Live, Section 5.2.
+2
+
+--- PAGE 3 ---
+Sources
+Assigned
+source feeds
+Shared memory
+Current
+beliefs
+Agent
+Candidate claim and evidence
+Admission policy
+Evaluate claim and evidence
+in current memory
+Promote Request evidence
+Keep private Abstain
+store write
+Hidden: truth + future readers/actions
+Public sources
+Imported
+verdicts
+Authored setting
+Agents
++ consumers
+Lineage collapse
+Shared source
+Evidence 1 Evidence 2 Evidence 3
+3 Supports → 1 Independent source
+Fixed gold admission rule
+Simulated propagation
+Scenario
+Feeds
++ lineage
+Shared memory
+Current
+beliefs
+Retrieve → emit → decide
+Fixed source / decision order
+Promote
+Shared memory: next round
+Readers Consumer
+Logs
+Reach / exposure
+Answers
+Adoption
+Observed propagation
+(a) Shared-memory admission (b) CPB-Static (c) CPB-Live
+Input lineage: scenario-authored     Generated links: agent-declared     Truth: assertion-graded
+Figure 1: The instrument. Left: a policy chooses one of four actions for a candidate and its evidence, and
+only promote writes the store. Middle: CPB-Static collapses lineage, so three supports from one source
+count as one, and scores against a fixed gold rule with simulated propagation. Right: CPB-Live reads reach
+and exposure from the store’s log and adoption from the consumer’s answer.
+Propagation and benchmarks.Multi-agent systems adopt false beliefs collectively and consolidate them
+into memory (Xu et al., 2026), harm amplifies under perturbation and ideas spread through interaction
+alone (Rahman et al., 2026; Papadopoulos et al., 2026), majorities can correct misinformed agents (Becker
+et al., 2026), judge panels err together (Kohli, 2026), and belief-based memory helps most under conflict
+(Singh, 2026). Risk-weighted gating, abstention and stale inherited constraints are studied without shared
+memory (Iyer and Babu, 2026; Liu et al., 2026; Nakayashiki, 2026). Memory benchmarks test retention and
+retrieval by one writer (Maharana et al., 2024; Wu et al., 2025; Hu et al., 2025), conflict benchmarks how
+one model resolves contradictions (Su et al., 2024; Xie et al., 2024; Xiang et al., 2026), and belief revision,
+partial observability and claim-level correction have their own lines (Park, 2026; Liao et al., 2026; Kong
+et al., 2026). None executes admission in a running team with logged shared-memory access and measured
+adoption.
+3 Method
+3.1 Problem formulation
+CPB measures admission to shared memory and its consequences, Figure 1. A teamAshares beliefsS t
+at roundt. Each agent observes its assigned sources, retrievesS t and emits candidate claims, each candi-
+datemwith evidenceE m. An admission policyπmaps⟨m, E m, St⟩toPROMOTE,REQUEST EVIDENCE,
+KEEP PRIVATEorABSTAIN, and onlyPROMOTEchanges the store, making the claim retrievable by every
+agent from the next round.
+Candidates are processed in a fixed agent order within each round. Every policy receives the same scheduled
+sources, but later candidates differ because agents retrieve different admitted beliefs. The policy sees neither
+claim truth nor its future readers.
+3
+
+--- PAGE 4 ---
+3.2 Measurement requirements
+Distinguishing independent support from repetition.Evaluating dependence needs a copy relation inde-
+pendent of the policy under test.E m is an evidence graph whose nodes carry a stance, a source identifier
+and, where available, a parent source. Lineage collapse merges nodes that share a parent or derive from
+one another and counts the remaining supporting groups, as copy-aware truth discovery does with inferred
+parents (Dong et al., 2009b). Inferred parents need many sources and confound copying with correlated
+truth, and the dependencies GovMem and MemTX act on are synthetic or writer-declared (Qi et al., 2026;
+Li et al., 2026b). CPB fixes the relation in the scenario, so a policy’s collapse is scored against it and not
+against a similarity proxy.
+In CPB-Live the scenario fixes the lineage of every feed before any policy runs, a reference that owes nothing
+to text similarity. Generated claims are another matter: the store logs retrieval but not which retrieved belief
+a candidate restates, so that derivation is available only through agent declarations, whose incompleteness
+we measure.
+Observing downstream exposure.The consequences of a wrong promotion depend on who retrieves it
+and what they do with it. Assigning reach and severity in advance specifies a cost model without measuring
+a consequence, so CPB-Live records retrievals after admission and probes consumer answers: the log gives
+reach and exposure within the simulation, the probe adoption. GovMem specifies this experiment and
+CAMA names the loop it closes (Qi et al., 2026; Lin et al., 2026), and CPB-Live executes it.
+3.3 The instrument
+CPB-Staticis an assembly protocol over public annotated sources. It imports verdicts and adds an authored
+multi-agent setting: agent observations, expected reach, severity and consumer tasks. A fixed rule maps each
+episode to a gold action, promoting a supported claim with enough independent sources and withholding
+otherwise. Since the rule counts sources after lineage collapse and simulates propagation over authored
+consumers, Static scores agreement with this specification and not the emergent effects of dependence.
+CPB-Liveruns the team of Section 3.1 over a store that logs every write and retrieval, and a consumer then
+answers a targeted question from what the store holds. Reach and exposure are read from the log, adoption
+from the consumer’s answer and lineage from the scenario, so both conditions of Section 3.2 are met.
+LetFbe the admitted beliefs the grader marks false,t b the round at which beliefbwas written,R(b)
+the agents that retrieved it, andCthe consumer’s reads, each a roundr. Realised reach is| S
+b∈F R(b)|.
+Propagation damage is|{r∈C:∃b∈F, t b < r}|, the consumer reads made while a false belief was
+retrievable, which is exposure within the simulation and not real-world harm. Correlated agreement is the
+number of candidates whose declaration names a shared belief, amplification the number whose declaration
+names a belief inFdivided by|F|, and order sensitivity the share of swapped-order pairs whose false or
+true write counts differ.
+Claim truth is judged apart from provenance: a fixed grader decides whether a candidate’s sentence as-
+serts the scenario’s false or true proposition, so an uncited restatement counts as false and a hedge citing a
+false source does not, while citations and declared dependencies describe provenance alone. Appendix N
+compares the rules and Appendix L validates the grader.
+4
+
+--- PAGE 5 ---
+4 Experimental Setup
+4.1 CPB-Static
+CPB-Static imports verdicts from claim-verification corpora (Schlichtkrull et al., 2023; Thorne et al., 2018),
+supersession chains from a multi-hop editing corpus (Zhong et al., 2023), and lineage groups from the
+Wikipedia citation graph (Petroni et al., 2022). Two annotators assess under a released protocol whether
+each group asserts one proposition. The 1,200 six-agent episodes comprise 600 training, 200 validation and
+400 test episodes. The gold rule requires two independent sources, and the test split was hashed and frozen
+before evaluation. Appendix B details construction, audit and provenance.
+4.2 CPB-Live
+Each episode runs six agents for six rounds over one configuration committed in advance, so episodes and
+configurations count the same unit, and all scenario content is authored fiction.
+Four scenario families test distinct interactions.Correlated agreementgives one agent a root fact and,
+in half the scenarios, a second agent independent corroboration.Concurrent conflictgives two agents
+incompatible evidence simultaneously, followed by authoritative confirmation two rounds later.Mixed
+scenarios pair a background fact with a later feed requiring that context.Dual sourcegives one agent a true
+root with an independent restatement or a false root with a verbatim or reworded copy in the same round.
+Each backbone runs 100 configurations: 60 base configurations, 50 scenarios and their 10 order-swapped
+variants, 20 dual-source configurations split between verbatim copies and independent restatements, and 20
+reworded-copy configurations split between web and authoritative source types. Thirty more complete the
+cross of truth and form, ten each with a true root beside a verbatim copy, a true root beside a reworded
+copy, and a false root beside an independent restatement typed authoritative. They run on Qwen and the
+closed family and never enter the pooled rows of the eight policies. The judge comparison uses the 60 base
+configurations, and the consumer probe of Section 3.3 is asked at round six over the committed transcript.
+4.3 Policies and backbones
+Ten policies run on Static and eight on Live. Private only and share-all are the endpoints. Confidence gating
+thresholds a proxy, and majority and unanimity votes count nominal support, over agent stances on Static
+and over cited sources on Live, where the vote promotes on one supporting citation with no contradiction,
+keeps private when contradictions outnumber supports, and requests evidence otherwise. The independence
+vote requires two supporting groups after near-duplicate collapse. DEPEN discounts suspected copying
+from statistical agreement and source accuracy (Dong et al., 2009b), and GovMem’s review-all-correlated
+rule routes correlated support to review (Qi et al., 2026). Governance, the source-type gate, promotes
+fresh authoritative support without contradiction, abstains on an unresolved contradiction and otherwise
+defers. The LLM judge returns one action from a textual view of the same input, and logistic regression and
+gradient-boosted trees are trained baselines over shared structured features.
+Policies receive the same reconstructed public view without the retrieval log, and equal validation budgets
+for tuning. Live rules use candidate-level cited evidence rather than fixed agent votes, Appendix C, and
+confidence gating, unanimity and the trained baselines run on Static only. Two diagnostic arms of the
+independence vote run on the dual-source sets of Qwen and the closed family, with their own rows pooled
+over the two dual-source sets every family ran, the cross set entering the cross table alone: a lineage oracle
+whose copy groups are the authored lineage, information no policy can have, and a semantic collapse whose
+5
+
+--- PAGE 6 ---
+copy groups are components of bidirectional entailment under the pinned scorer. A share-all arm with the
+agents’ retrieval of shared memory switched off runs on the base configurations of the same two families.
+Live also runs components from two published systems, Section 5.2: Mem0 as the store, its own write
+path deciding what an admitted candidate becomes (Chhikara et al., 2025), and A-MemGuard’s consistency
+check as a policy over the candidate, its cited sources and the nearest visible beliefs (Wei et al., 2025).
+Table 2 in Appendix A lists coverage.
+Qwen3.5-9B is the primary backbone and Gemma-3-12B and Llama-3.1-8B replicate it (Qwen Team, 2026;
+Kamath et al., 2025; Grattafiori et al., 2024), all three commit-pinned and decoding greedily with reasoning
+disabled, and Claude Opus 5, the closed family, uses provider-default sampling through the Anthropic API
+with every response persisted (Anthropic, 2026). Each family’s backbone serves as its six agents, consumer
+and judge, Claude also judges Qwen on the 60 base configurations, and the selected Static judge prompt
+runs on all four backbones.
+4.4 Metrics and statistics
+Static false-promotion rate is the proportion promoted among candidates with a non-promote gold action.
+Live adoption is the proportion of probes asserting the false value, and correctness is the proportion as-
+serting the true value among scenarios containing one. Candidate truth, exposure and provenance follow
+Section 3.3, and Appendices L and M validate the two graders.
+Static intervals use source-item cluster bootstraps, six comparisons specified before test access use Holm
+correction, and every other analysis, Live included, is pre-registered as descriptive and reported without
+hypothesis tests.
+5 Results
+Ten policies run on the frozen Static split and eight on Live, plus a frontier judge over Qwen agents, on four
+agent families with one hundred configurations each, Table 2, under the metrics of Sections 3.3 and 4.4. Cor-
+rection, arrival order and declared provenance are in Appendix K and the pre-registered Static comparisons
+in Appendix Q.
+5.1 Admission, exposure and downstream utility
+F1. Among the tested policies, only governance keeps damage low while still answering in every
+family, and the judges that filter halve damage at best.
+Table 1 reports the three rates over each policy’s own stream, where private only is 0.000 and share-all 1.000
+by construction and 1.000 elsewhere means every candidate of that kind was admitted, and Figure 2 adds
+the probe’s adoption and correctness, Appendix E.
+Majority vote matches share-all on Qwen in damage and FA, since candidates cite supporting evidence
+without exposing contradictions, and the few true candidates it withheld arrived with a contradiction in
+view. On Gemma and Llama its damage stays at 0.985 and 0.981 while FA falls to 0.649 and 0.108, since
+one admitted copy exposes the same readers, and only on the closed family does damage fall, to 0.864.
+The local judge matches share-all on Qwen and nearly so on Gemma, at FA 0.988. The Llama and closed-
+family judges halve damage, to 0.483 and 0.472, at FA 0.325 and 0.473 and TA 0.323 and 0.435. Rejection
+6
+
+--- PAGE 7 ---
+Table 1: CPB-Live, the 100 configurations of each family pooled.Dmg: damage as a share of share-all’s.
+FAandTA: false and true admissions as shares of the false and true candidates the policy saw. The last
+block is the two published systems of Section 5.2.
+Qwen3.5-9B Gemma-3-12B Llama-3.1-8B Claude Opus 5
+Policy Dmg↓FA↓TA↑Dmg↓FA↓TA↑Dmg↓FA↓TA↑Dmg↓FA↓TA↑
+Private only 0.000 0.000 0.000 0.000 0.000 0.000 0.000 0.000 0.000 0.000 0.000 0.000
+Share all 1.000 1.000 1.000 1.000 1.000 1.000 1.000 1.000 1.000 1.000 1.000 1.000
+Majority vote 1.000 1.000 0.964 0.985 0.649 0.459 0.981 0.108 0.100 0.864 0.672 0.529
+LLM judge 1.000 1.000 1.000 0.985 0.988 0.975 0.483 0.325 0.323 0.472 0.473 0.435
+Governance rule 0.152 0.161 0.481 0.137 0.145 0.463 0.151 0.137 0.133 0.112 0.120 0.348
+Independence 0.289 0.306 0.127 0.244 0.258 0.123 0.257 0.119 0.051 0.243 0.250 0.108
+Mem0 store 1.000 1.000 1.000 1.000 1.000 1.000 0.940 1.000 1.000 0.991 1.000 1.000
+Mem0 gated 0.152 0.161 0.481 0.137 0.083 0.373 0.151 0.079 0.112 0.112 0.120 0.337
+A-MemGuard 1.000 1.000 0.982 0.985 0.988 0.869 0.966 0.819 0.791 0.995 1.000 0.667
+alone does not settle utility: the Llama judge reaches 0.78 correctness, the highest on its family, at 0.22 adop-
+tion, and the closed-family judge 0.40 at 0.19. On Static the frontier judge has the lowest false-promotion
+rate, 0.077 against 0.228 to 0.285, and the lowest accuracy, 0.41, since it keeps 0.54 of candidates private
+against 0.00 to 0.31 for the open judges: at its one operating point it withholds more rather than separating
+better, and equal coverage is not tested here, Appendix O.
+The independence class, on its merged row, admits 0.119 to 0.306 of false candidates and 0.051 to 0.127 of
+true ones, so it rejects true claims more firmly than false ones on every family, with damage shares of 0.243
+to 0.289, correctness of 0.13 to 0.17 and adoption of 0.11 to 0.18. Its three rules agree on the open families
+under one collapse predicate and differ on the closed family, Appendix C.
+The governance rule holds damage shares of 0.112 to 0.152, FA of 0.120 to 0.161 and TA of 0.133 to 0.481,
+with 0.06 to 0.09 adoption and 0.58 to 0.65 correctness. Its correctness is 0.90 on concurrent conflict, 0.90
+on correlated agreement and 0.00 on mixed scenarios, so it is strongest where the scenario supplies the
+authoritative source type it gates on, which Section 5.5 tests directly.
+5.2 Two published components inside the instrument
+F2. Mem0 removes duplicates and not false adoption, and A-MemGuard’s check passes falsehoods
+their cited sources support.
+The last block of Table 1 gives the two components’ admission rates, and Appendix D what the store held
+and what the consumer answered. Under share-all Mem0 rejects nothing: its damage share is 1.000 on
+Qwen and Gemma, 0.991 on the closed family and 0.940 on Llama, where absorbed re-raisings delay some
+first false writes by a round, it holds a false belief in 0.62, 0.62, 0.60 and 0.50 of configurations on Qwen,
+Gemma, Llama and the closed family against the native store’s 0.62, 0.62, 0.63 and 0.50, and adoption
+is 0.51, 0.32, 0.41 and 0.43 against 0.45, 0.32, 0.47 and 0.44. Deduplication absorbs 0.67 of Gemma’s
+admissions and 0.86 of Llama’s, mostly by folding false candidates into false beliefs already held, so it
+removes redundancy and not error.
+7
+
+--- PAGE 8 ---
+0.00 0.25 0.50
+0.0
+0.5
+1.0
+correct answers
+Qwen3.5-9B
+0.00 0.25 0.50
+Gemma-3-12B
+0.00 0.25 0.50
+Llama-3.1-8B
+0.00 0.25 0.50
+Claude Opus 5
+false adoption
+Private only
+Governance rule
+Independence vote
+DEPEN
+Review all correlated
+Majority vote
+LLM judge Share all
+Figure 2: False adoption and correctness on CPB-Live, the eight policies on the 100 configurations of each
+family. Values in Appendix E, where the diagnostic arms and the frontier judge over Qwen appear on their
+own pools.
+Behind the governance rule Mem0 holds the rule’s own 0.10, 0.09, 0.10 and 0.06, is adopted at 0.09, 0.06,
+0.07 and 0.07, and still admits the authoritatively typed rewording.
+A-MemGuard’s consistency check rejects 0.00, 0.01, 0.18 and 0.00 of false candidates, with damage shares
+of 1.000, 0.985, 0.966 and 0.995, false beliefs held in 0.62, 0.61, 0.61 and 0.50 of configurations and
+adoption of 0.45, 0.33, 0.48 and 0.45. On the closed family it keeps about half of all candidates private yet
+rejects no false one, since each arrives with supporting source text, so what it withholds is a third of the
+true candidates. The tested write and consistency checks leave falsehoods supported by their cited evidence
+admissible.
+5.3 Adoption with and without a competing truth
+F3. With shared memory as the only source, an uncontested false belief is asserted in 0.97 to 0.99
+of probes, and adoption is lower beside a competing truth.
+The consumer has no source of its own, and it abstained in all 1,551 probes whose episode promoted nothing.
+Figure 3 splits the probes with exactly one visible false belief by whether a true belief stood beside it.
+Without one, false adoption was 0.98, 0.99, 0.99 and 0.97 on Qwen, Gemma, Llama and the closed family,
+553 probes in all. Under this constraint, every model repeats an uncontested false memory as fact.
+With a competitor, answers naming the false value alone fall to 0.15 of 160 probes, and 46 more name both
+values. Counting those, the false value is voiced in 0.60 of Qwen probes, 0.43 of Gemma, 0.33 of Llama
+and 0.16 of closed-family probes, so a competing truth is where the models part.
+All 192 probes with both a true and a false belief visible come from concurrent-conflict scenarios, the
+only family that delivers a later confirmation, so the protection is measured there alone, and it fades with
+accumulation: with three or more false beliefs beside one true one, false-only adoption returns to 0.42,
+Appendix F.
+8
+
+--- PAGE 9 ---
+0.0
+0.5
+1.0
+share of probes
+n=196
+alone
+n=57
+with a
+true belief
+Qwen3.5-9B
+n=126
+alone
+n=54
+with a
+true belief
+Gemma-3-12B
+n=105
+alone
+n=30
+with a
+true belief
+Llama-3.1-8B
+n=126
+alone
+n=19
+with a
+true belief
+Claude Opus 5
+asserted the false value named both values named the true value
+Figure 3: Consumer answers with exactly one visible false belief, the nine policies’ probes on the pool
+of Table 5, by family. Left bars show stores without a competing true belief, and right bars include one.
+Answers naming both values count as voicing the false value.
+5.4 Refusal on each policy’s own candidate stream
+F4. Governance refuses most false candidates in every family, while majority-vote refusal runs
+from zero to nine in ten with the backbone.
+Under share-all the agents emit 0.62, 0.81, 7.35 and 0.56 false candidates per configuration over the 100
+configurations on Qwen, Gemma, Llama and the closed family, so Table 8 in Appendix G conditions on a
+false candidate and reports the share refused, drawn as Figure 5. The governance rule refuses 0.84 to 0.88
+and the independence class 0.67 to 0.88.
+Majority vote refuses 0.00 on Qwen, 0.35 on Gemma, 0.89 on Llama and 0.33 on the closed family. The
+live vote promotes when a cited source supports the claim and nothing visible contradicts it, so its refusal
+follows what the agents cite, and most of Llama’s false candidates are uncited restatements. Local judges
+range from 0.00 to 0.68.
+Across families the rule’s refusal moves by 0.04 and the vote’s by 0.89, since the rule gates on a source type
+every stream carries and the vote on evidence whose amount varies with the family.
+5.5 Sensitivity to rewording and source type
+F5. Among the tested promoting policies, only the lineage oracle refuses all three copy regimes.
+Rewording passes surface collapse and authoritative typing passes the governance rule.
+Dual-source configurations give one agent two sources in one round, Figure 4 and Appendix H. The inde-
+pendence class refuses the verbatim copy in every family, at 0.00 adoption, and admits the reworded copy,
+which states the same proposition below the similarity threshold, in most configurations, at 0.65 to 0.72
+adoption pooled over families.
+The governance rule holds 0.00 adoption on both copies while they are typed as web text and 0.70 once the
+reworded copy is typed as a register document, so its protection rests on source type and not on detecting the
+copy. Summed over policies, false admissions rise from 12 to 30 on verbatim copies to 38 to 54 on reworded
+and 43 to 70 on authoritatively typed ones.
+9
+
+--- PAGE 10 ---
+verbatim
+copy
+reworded
+copy
+reworded,
+authoritative
+0
+40
+80
+admitted false beliefs
+Qwen3.5-9B
+Gemma-3-12B
+Llama-3.1-8B
+Claude Opus 5
+verbatim
+copy
+indep. reworded
+copy
+reworded,
+authoritative
+Governance rule
+Independence vote
+DEPEN
+Review all correlated
+Majority vote
+LLM judge
+Share all
+Lineage oracle
+Semantic collapse
+0.00 0.00 0.00 0.70
+0.00 0.00 0.68 0.75
+0.00 0.00 0.65 0.72
+0.00 0.00 0.72 0.72
+0.88 0.00 0.85 0.78
+0.63 0.00 0.67 0.73
+0.95 0.00 0.85 0.85
+0.00 0.00 0.00 0.00
+0.00 0.00 0.10 0.15
+downstream adoption, pooled over families
+Figure 4: Dual-source copy regimes. Left: false admissions summed over the nine policies, by regime and
+family. Right: downstream adoption by policy and regime, pooled over the families’ configurations.
+5.6 Independence against truth
+F6. Admission follows the form of the second source more than the truth of the claim: no pol-
+icy refuses a verbatim copy of one truth and admits it of the other, and whatever admits a false
+independent restatement admits the true one.
+The cross set adds the missing cells, a true root beside a verbatim copy, a true root beside a reworded copy
+and a false root beside an independent restatement typed as a register document, ten each on Qwen and the
+closed family, and Table 13 crosses truth with form for every policy, pooled over the families that ran each
+cell, Appendix I. The independence class writes the verbatim claim in 0.00 of configurations whether false
+or true, the reworded claim in 0.72 when false and 1.00 when true, and the independent one in 0.90 and
+1.00. The governance rule writes no verbatim or reworded claim of either truth and the independent one in
+0.95 and 1.00, since that source arrives typed as a register document. Share-all and the vote write nearly
+every cell. Two pairs move with truth: the independence class’s reworded pair, whose false half pools four
+families and whose true half the two that ran the cross set, 0.90 against 1.00 on Qwen and 0.60 against 1.00
+on the closed family, and the closed-family judge’s independent pair, 0.60 against 0.70, after it refuses every
+verbatim pair.
+Two diagnostic arms bound the collapse class. The lineage oracle, the independence vote with the authored
+copy relation in place of surface similarity, writes no verbatim or reworded claim of either truth and admits
+the independent one in 0.95 when false and 0.90 when true. Semantic collapse, the same vote with copy
+groups from bidirectional entailment under the pinned scorer, lets 0.10 of the reworded false claims and 0.15
+of the reworded true ones through and admits the independent pair as the oracle does. Perfect copy detection
+removes the rewording failure of F5 but cannot establish the truth of independent support. The source type
+that places governance in F1 also admits the false restatement here.
+5.7 The write-back loop
+F7. Switching off the agents’ retrieval of shared memory removes three quarters of what the closed
+family’s agents say and every declared dependency, and at most one false write.
+Share-all ran again with the agents’ retrieval of shared memory switched off, the policy still seeing the store
+and the consumer still reading it, on the 60 base configurations of Qwen and the closed family, Table 14 in
+10
+
+--- PAGE 11 ---
+Appendix J. On the closed family candidates per configuration fall from 8.3 to 2.2 and candidates declaring
+a shared belief from 189 to 0, so three quarters of what the agents said followed a read of the store, while
+false candidates per configuration stay at 0.5, false writes at 28 and 27, configurations holding a false belief
+at 0.42 and 0.45, damage at 115 and 122, and adoption at 0.27 and 0.23. On Qwen, whose agents never
+declared a dependency, candidates per configuration go from 1.3 to 1.7 while false candidates stay at 0.6,
+false writes at 33 and damage at 147, with adoption 0.30 and 0.25. Under share-all, the loop adds agreement
+to falsehoods already supplied by the feeds while exposure changes little. Whether this agreement increases
+false admission under the policies of F1 that count support remains untested.
+6 Conclusion
+CPB fixes the lineage of every input source before a policy runs and observes the reach of every admitted
+belief after it. On it, agreement, consistency and source authority each leave a route by which a falsehood
+enters shared memory and reaches the consumer’s answer, admission follows the form of the second source
+more than the truth of the claim, a perfect copy relation included, and under share-all, switching the agents’
+write-back off removes most of what the closed family’s agents say and at most one false write. Three
+limits, set out in Appendix S, bound the claims: parent independence in the correlated-agreement family is
+presumed from distinct citations, collapse is shown to refuse copies and not to admit corroboration, and the
+protective effect of a competing truth is measured in one family.
+References
+Anthropic. System card: Claude Opus 5.https://www.anthropic.com/transparency, July
+2026.
+Jonas Becker, Jan Philip Wahle, Terry Ruas, and Bela Gipp. Misinformation propagation in benign multi-
+agent systems.arXiv preprint arXiv:2606.16710, 2026.
+Varun Pratap Bhardwaj, Garima Singh, and Arun Pratap Bhardwaj. SuperLocalMemory 4.0: The governed
+memory operating system for AI agents.arXiv preprint arXiv:2608.08253, 2026.
+Zhaorun Chen, Zhen Xiang, Chaowei Xiao, Dawn Song, and Bo Li. AgentPoison: Red-teaming LLM
+agents via poisoning memory or knowledge bases.arXiv preprint arXiv:2407.12784, 2024.
+Prateek Chhikara, Dev Khant, Saket Aryan, Taranjeet Singh, and Deshraj Yadav. Mem0: Building
+production-ready AI agents with scalable long-term memory.arXiv preprint arXiv:2504.19413, 2025.
+Diego F. Cuadros, Abdoul-Aziz Maiga, Helen Meskhidze, and Andre Curtis-Trudel. Governed collaborative
+memory as artificial selection in LLM-based multi-agent systems.arXiv preprint arXiv:2605.04264,
+2026.
+Tianyu Ding, Aditya Nannapaneni, Bingfan Liu, and Ling Zhang. Always-on agents: A survey of persistent
+memory, state, and governance in LLM agents.arXiv preprint arXiv:2606.30306, 2026.
+Shen Dong, Shaochen Xu, Pengfei He, Yige Li, Jiliang Tang, Tianming Liu, Hui Liu, and Zhen Xiang.
+Memory injection attacks on LLM agents via query-only interaction.arXiv preprint arXiv:2503.03704,
+2025.
+11
+
+--- PAGE 12 ---
+Xin Luna Dong, Laure Berti-Equille, and Divesh Srivastava. Truth discovery and copying detection in a
+dynamic world.Proceedings of the VLDB Endowment, 2(1):562–573, 2009a. doi: 10.14778/1687627.
+1687691.
+Xin Luna Dong, Laure Berti-Equille, and Divesh Srivastava. Integrating conflicting data: the role of source
+dependence.Proceedings of the VLDB Endowment, 2(1):550–561, 2009b. doi: 10.14778/1687627.
+1687690.
+Xin Luna Dong, Laure Berti-Equille, Yifan Hu, and Divesh Srivastava. Global detection of complex copying
+relationships between sources.Proceedings of the VLDB Endowment, 3(1-2):1358–1369, 2010. doi:
+10.14778/1920841.1921008.
+Joseph Fioresi, Parth Parag Kulkarni, Ashmal Vayani, Song Wang, and Mubarak Shah. Learning to share:
+Selective memory for efficient parallel agentic systems. InInternational Conference on Machine Learning
+(ICML), 2026. arXiv:2602.05965.
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, et al. The Llama
+3 herd of models.arXiv preprint arXiv:2407.21783, 2024.
+Yupeng Han, Shuochen Liu, Kai Zhang, Ze Liu, Zhihong Pan, and Xianquan Wang. Learning what to share
+and what to personalize: Hierarchical strategy co-evolution for agent memory. InProceedings of the 2026
+Conference on Empirical Methods in Natural Language Processing (EMNLP), 2026. arXiv:2608.25329.
+Tianyu Hu, Weikai Lin, Weizhi Zhang, Jing Ma, and Song Wang. MemRouter: Memory-as-embedding
+routing for long-term conversational agents.arXiv preprint arXiv:2605.00356, 2026.
+Yuanzhe Hu, Yu Wang, and Julian McAuley. Evaluating memory in LLM agents via incremental multi-turn
+interactions.arXiv preprint arXiv:2507.05257, 2025. MemoryAgentBench.
+Laxmipriya Ganesh Iyer and Rahul Suresh Babu. Capability minimization as a safety primitive: Risk-aware
+causal gating for least-privilege LLM agents.arXiv preprint arXiv:2606.13884, 2026.
+Aishwarya Kamath, Johan Ferret, Shreya Pathak, Nino Vieillard, Ramona Merhej, et al. Gemma 3 technical
+report.arXiv preprint arXiv:2503.19786, 2025.
+Guneet Kohli. Nine judges, two effective votes: Correlated errors undermine LLM evaluation panels.arXiv
+preprint arXiv:2605.29800, 2026.
+Weitong Kong, Di Wen, Kunyu Peng, David Schneider, Zeyun Zhong, Alexander Jaus, Zdravko Marinov,
+Jiale Wei, Ruiping Liu, Junwei Zheng, Yufan Chen, Lei Qi, and Rainer Stiefelhagen. IMPACT-CYCLE: A
+contract-based multi-agent system for claim-level supervisory correction of long-video semantic memory.
+arXiv preprint arXiv:2604.20136, 2026.
+Chris Latimer, Nicol ´o Boschi, Andrew Neeser, Chris Bartholomew, Gaurav Srivastava, Xuan Wang, and
+Naren Ramakrishnan. Hindsight is 20/20: Building agent memory that retains, recalls, and reflects.arXiv
+preprint arXiv:2512.12818, 2025.
+Baichuan Li, Junyi Yao, and Zihao Zheng. Remember, verify, or ask? cross-family evaluation of memory
+commitment in LLM agents.arXiv preprint arXiv:2608.19564, 2026a.
+Xiaoyang Li, Yiqi Wang, Haohui Lu, Zhi Chen, Mo Li, Pingan Song, Mingkai Zheng, and Taotao Cai.
+MemTX: Transactional belief commit for stateful agent memory.arXiv preprint arXiv:2607.23929,
+2026b.
+12
+
+--- PAGE 13 ---
+Junfeng Liao, Qizhou Wang, Jianing Zhu, Bo Du, Rui Yan, and Xiuying Chen. Belief memory: Agent
+memory under partial observability.arXiv preprint arXiv:2605.05583, 2026.
+Chenchen Lin, Wenhao Yuan, Xuehe Wang, and Edith Cheuk Han Ngai. Beyond memory majority: Latent-
+source reasoning for multi-agent memory arbitration.arXiv preprint arXiv:2608.19701, 2026.
+Xun Liu, Yi Evie Zhang, Vira Kasprova, Parisa Rabbani, Pardis Sadat Zahraei, Tianyu Zhang, Ali
+Ebrahimpour-Boroojeny, and Varun Chandrasekaran. AgentAbstain: Do LLM agents know when not
+to act?arXiv preprint arXiv:2607.10059, 2026.
+Adyasha Maharana, Dong-Ho Lee, Sergey Tulyakov, Mohit Bansal, Francesco Barbieri, and Yuwei Fang.
+Evaluating very long-term conversational memory of LLM agents. InProceedings of the 62nd Annual
+Meeting of the Association for Computational Linguistics (ACL), 2024. arXiv:2402.17753.
+Yanki Margalit, Nurit Cohen-Inger, Erni Avram, Ran Taig, and Oded Margalit. Governed shared memory
+for multi-agent LLM systems.arXiv preprint arXiv:2606.24535, 2026.
+Kazuki Nakayashiki. When stale constraints go unchecked: Budgeted verification failures in inherited agent
+memory.arXiv preprint arXiv:2608.25553, 2026.
+Vassilis Papadopoulos, McNair Shah, Sam Zimmerman, and Jack Lindsey. Mind viruses: Self-propagating
+ideas in multi-agent LLM systems.arXiv preprint arXiv:2608.10218, 2026.
+Young Bin Park. Graph-native cognitive memory for AI agents: Formal belief revision semantics for ver-
+sioned memory architectures.arXiv preprint arXiv:2603.17244, 2026.
+Fabio Petroni, Samuel Broscheit, Aleksandra Piktus, Patrick Lewis, Gautier Izacard, Lucas Hosseini, Jane
+Dwivedi-Yu, Maria Lomeli, Timo Schick, Pierre-Emmanuel Mazar ´e, Armand Joulin, Edouard Grave,
+and Sebastian Riedel. Improving Wikipedia verifiability with AI.arXiv preprint arXiv:2207.06220,
+2022. W AFER / SIDE.
+Ravali Pochampally, Anish Das Sarma, Xin Luna Dong, Alexandra Meliou, and Divesh Srivastava. Fusing
+data with correlations. InProceedings of the 2014 ACM SIGMOD International Conference on Manage-
+ment of Data, pages 433–444, 2014. doi: 10.1145/2588555.2593674.
+Yijiashun Qi, Xiang Xu, and Yuxuan Li. When not to write memory: Governing false promotion from
+correlated agent traces. InMLISE 2026 Workshop, 2026. arXiv:2607.02579.
+Qwen Team. Qwen3.5: Towards native multimodal agents.https://qwen.ai/blog?id=qwen3.5,
+February 2026.
+Md Hafizur Rahman, Zafaryab Haider, Tanzim Mahfuz, and Prabuddha Chakraborty. HARP: Measuring
+harm amplification in multi-agent LLM systems.arXiv preprint arXiv:2605.27489, 2026.
+Zhe Ren, Yibo Yang, Yimeng Chen, Zijun Zhao, Benshuo Fu, Zhihao Shu, Bingjie Zhang, Yangyang Xu,
+Dandan Guo, and Shuicheng Yan. GateMem: Benchmarking memory governance in multi-principal
+shared-memory agents.arXiv preprint arXiv:2606.18829, 2026.
+Alireza Rezazadeh, Zichao Li, Ange Lou, Yuying Zhao, Wei Wei, and Yujia Bao. Collaborative
+memory: Multi-user memory sharing in LLM agents with dynamic access control.arXiv preprint
+arXiv:2505.18279, 2025.
+13
+
+--- PAGE 14 ---
+Michael Schlichtkrull, Zhijiang Guo, and Andreas Vlachos. A VeriTeC: A dataset for real-world claim veri-
+fication with evidence from the web. InAdvances in Neural Information Processing Systems (NeurIPS),
+Datasets and Benchmarks Track, 2023. arXiv:2305.13117.
+Bronislav Sidik and Lior Rokach. MEMTIER: Tiered memory architecture and retrieval bottleneck analysis
+for long-running autonomous AI agents.arXiv preprint arXiv:2605.03675, 2026.
+Pranav Singh. When does belief-based agent memory help? reliability-conditional updating and
+provenance-capped poisoning defense.arXiv preprint arXiv:2606.22030, 2026.
+Zhaochen Su, Jun Zhang, Xiaoye Qu, Tong Zhu, Yanshu Li, Jiashuo Sun, Juntao Li, Min Zhang, and
+Yu Cheng. ConflictBank: A benchmark for evaluating the influence of knowledge conflicts in LLM.
+arXiv preprint arXiv:2408.12076, 2024.
+James Thorne, Andreas Vlachos, Christos Christodoulopoulos, and Arpit Mittal. FEVER: a large-scale
+dataset for fact extraction and VERification. InProceedings of the 2018 Conference of the North American
+Chapter of the Association for Computational Linguistics (NAACL), 2018. arXiv:1803.05355.
+Yiqi Wang, Jiaqi Zhang, Taotao Cai, Zirui Liu, Qingqiang Sun, Zequn Sun, Zhangkai Wu, Manqing Dong,
+Mingkai Zheng, Xuefei Yin, and Yanming Zhu. From agent traces to trust: A survey of evidence tracing
+and execution provenance in LLM agents.arXiv preprint arXiv:2606.04990, 2026.
+Qianshan Wei, Tengchao Yang, Yaochen Wang, Xinfeng Li, Lijun Li, Zhenfei Yin, Yi Zhan, Thorsten Holz,
+Zhiqiang Lin, and XiaoFeng Wang. A-MemGuard: A proactive defense framework for LLM-based agent
+memory.arXiv preprint arXiv:2510.02373, 2025.
+Di Wu, Hongwei Wang, Wenhao Yu, Yuwei Zhang, Kai-Wei Chang, and Dong Yu. LongMemEval: Bench-
+marking chat assistants on long-term interactive memory. InInternational Conference on Learning Rep-
+resentations (ICLR), 2025. arXiv:2410.10813.
+Shanglin Wu, Yuyang Luo, Yueqing Liang, Kaiwen Shi, Yanfang Ye, Ali Payani, and Kai Shu. Scaling
+teams or scaling time? memory enabled lifelong learning in LLM multi-agent systems.arXiv preprint
+arXiv:2604.03295, 2026.
+Zhishang Xiang, Zerui Chen, Yunbo Tang, Zhimin Wei, Ruqin Ning, Yujie Lin, Qinggang Zhang,
+and Jinsong Su. MemSyco-Bench: Benchmarking sycophancy in agent memory.arXiv preprint
+arXiv:2607.01071, 2026.
+Han Xiao, Hongjun Xu, Xin Zhang, Yidong Chen, and Xiaodong Shi. TARL: Transaction-aware reliable
+ledgers for executable memory management in long-term agents.arXiv preprint arXiv:2608.03699, 2026.
+Jian Xie, Kai Zhang, Jiangjie Chen, Renze Lou, and Yu Su. Adaptive chameleon or stubborn sloth: Re-
+vealing the behavior of large language models in knowledge conflicts. InInternational Conference on
+Learning Representations (ICLR), 2024. ConflictQA; arXiv:2305.13300.
+Naen Xu, Hengyu An, Shuo Shi, Jinghuai Zhang, Chunyi Zhou, Changjiang Li, Tianyu Du, Zhihui Fu,
+Jun Wang, and Shouling Ji. When agents “misremember” collectively: Exploring the Mandela effect
+in LLM-based multi-agent systems. InInternational Conference on Learning Representations (ICLR),
+2026. arXiv:2602.00428.
+Tianyu Yang, Sudipta Paul, Vijay Srinivasan, Vivek Kulkarni, and Srinivas Chappidi. TRUSTMEM:
+Learning trustworthy memory consolidation for LLM agents with long-term memory.arXiv preprint
+arXiv:2606.25161, 2026.
+14
+
+--- PAGE 15 ---
+Guibin Zhang, Muxin Fu, Guancheng Wan, Miao Yu, Kun Wang, and Shuicheng Yan. G-Memory: Tracing
+hierarchical memory for multi-agent systems.arXiv preprint arXiv:2506.07398, 2025.
+Guilin Zhang, Wei Jiang, Xiejiashan Wang, Aisha Behr, Kai Zhao, Jeffrey Friedman, Xu Chu, and Amine
+Anoun. Adaptive memory admission control for LLM agents.arXiv preprint arXiv:2603.04549, 2026.
+Yan Zhang and Shibo Li. ConsistencyGate: Preventing memory contamination in LLM agents via self-
+consistency admission control.arXiv preprint arXiv:2607.22962, 2026.
+Zexuan Zhong, Zhengxuan Wu, Christopher D. Manning, Christopher Potts, and Danqi Chen. MQuAKE:
+Assessing knowledge editing in language models via multi-hop questions. InProceedings of the 2023
+Conference on Empirical Methods in Natural Language Processing (EMNLP), 2023. arXiv:2305.14795.
+15
+
+--- PAGE 16 ---
+Organisation of the appendix
+The appendix provides construction and policy details, supplementary results, and validation of the assertion
+grader. Sections follow the main text’s order, then the validation of the two graders, the judge material, the
+reproduction materials and the limitations. Tables are generated by committed scripts from stored results.
+A Coverage
+Table 2 lists evaluation coverage. Confidence and unanimity baselines require inputs supplied by Static
+episodes but absent from individual Live candidates. The trained baselines also run only on Static. The
+additional frontier judge evaluates Qwen agents on 60 Live base configurations. Other admission policies
+run in both settings. Mem0 and A-MemGuard require a running store and are evaluated only on Live, and
+Table 4 gives their per-family coverage.
+Table 2: Which policy ran on which half. Static is the frozen test split of 400 episodes, and Live is 100 com-
+mitted configurations per agent family, composed as Section 4.2 states, plus the 30 stage-6 configurations
+on two families.
+Policy Static, 400
+episodes
+Live
+Private only, share all, majority vote, governance rule yes four families, 100 configurations
+Independence vote, DEPEN, review all correlated yes four families, 100 configurations
+Stage-6 cells of the cross, seven policies no Qwen and Claude Opus 5, 30 configurations
+Lineage oracle, semantic collapse no Qwen and Claude Opus 5, 70 dual-source
+configurations
+Share all without the agents’ retrieval no Qwen and Claude Opus 5, 60 base
+configurations
+Confidence threshold, unanimity vote yes no
+LLM judge four backbones each family by its own backbone
+Frontier judge over Qwen agents no 60 base configurations
+Trained baselines, logistic and boosted trees yes no
+Mem0 as the store under share all and under governance, A-MemGuard
+as the policy
+no four families, 100 configurations
+B Corpus construction, audit and provenance ledger
+Adapters.Claim-verification adapters supply insufficient-evidence verdicts for unverifiable and high-
+stakes scenarios, refuted claims with authoritative counter-evidence for misleading-majority scenarios, and
+supported claims with independent parents for the balance class. The citation graph supplies groups whose
+articles either cite one document or cite independent documents asserting the same proposition. Surface
+features are matched so that lineage distinguishes their gold actions. Evidence stance comes from source
+verdicts where available and a pinned natural language inference model otherwise. A pinned zero-shot
+classifier assigns each episode to one of four topical domains.
+Audit and freeze.An audit applied four checks to 120 frozen test episodes and found two assembly
+defects. We corrected the code, rebuilt with unchanged seeds, audited the affected episodes and refroze
+the partition. The release reports residual stance errors and includes a field-level ledger of imported and
+authored content.
+16
+
+--- PAGE 17 ---
+Live configurations.Each agent family runs the 100 configurations specified in Section 4.2. Configura-
+tions were committed before execution and are released with the store logs used for scoring. The scripts
+and the tables below number the sets as stages: stage 2 is the base set, stage 4 the dual-source set, stage 5
+the reworded-copy set and stage 6 the cross set, and stages 1 and 3 were development sets that no reported
+number uses.
+C The policy view and the policies
+The view.Static policies receive an evidence graph with inferred stances, surface-based copy groups,
+source-type authority proxies, timestamp-based freshness and observing agents. Live policies receive the
+candidate text, cited source texts and types, retrievable beliefs, and declared provenance. Live decisions
+operate on candidate evidence rather than a fixed set of agent votes. Policies never see the retrieval log,
+authored lineage or claim truth.
+Merged rows.The independence vote, DEPEN and review-all-correlated rule make identical Live de-
+cisions on the three open families and share a table row. Their implementations use a common surface-
+collapse predicate, and declared provenance does not distinguish their decisions in these runs. They differ
+on the closed family, whose agents declare provenance on some candidates, and Table 3 gives their separate
+rows there.
+Table 3: The three rules of the independence class where they separate. On the three open families they
+decide identically on every episode and share the independence row of Table 1. Columns as in that table.
+Claude Opus 5
+Policy Dmg↓FA↓TA↑
+Independent-source vote 0.243 0.250 0.108
+DEPEN 0.224 0.260 0.111
+Review all correlated 0.280 0.333 0.108
+The policies. B0never promotes andB1always promotes.B2thresholds a confidence proxy,B3uses
+nominal majority support, andB4requires unanimity.B5requires two supporting groups after copy col-
+lapse.B15, DEPEN, estimates source accuracy and copying from statistical agreement and discounts sus-
+pected copiers (Dong et al., 2009b). Its comparison with B5 is pre-registered.B16, GovMem’s review-all-
+correlated rule, routes correlated support to review (Qi et al., 2026).B7promotes fresh authoritative support
+without contradiction, abstains under unresolved contradiction, and otherwise defers.
+B6is an LLM judge receiving the same view as text. Two prompt variants were specified before tuning,
+and one was selected on validation and evaluated once per backbone on test. On Live, each family uses its
+own backbone as judge, with an additional closed-model judge over Qwen agents. Logistic regression and
+gradient-boosted trees use the same structured features and fit on the Static training split. Threshold tuning
+uses equal validation budgets across policies.
+17
+
+--- PAGE 18 ---
+D Two published systems inside the instrument
+Table 4 compares two integrated components with share-all, governance and the local judge. Mem0 runs as
+the shared store using its shipped extraction prompt plus a domain instruction. Its extractor uses the family’s
+agent backbone through the same loaded instance, and its embedder is pinned. Admitted candidates enter its
+write path, and agents retrieve the resulting memories. We evaluate Mem0 under share-all and governance.
+A verbatim-storage control reproduces native-store decisions on the 60 Qwen base configurations.
+A-MemGuard’s unchanged repository consistency checker receives the candidate, its cited sources and the
+five nearest visible beliefs under the same embedder. It promotes when all checks pass, keeps the candidate
+private otherwise, and requests evidence when nothing can be checked.
+Refuse is the proportion of false candidates rejected. Hold is the proportion of configurations with a false
+belief at probe time. Adopt and Corr follow Appendix E. Absorb is the proportion of Mem0 admissions
+merged into existing memories.
+Table 4: Mem0 and A-MemGuard compared with reference policies by agent family.Ep.: configurations.
+Refuse: proportion of false candidates rejected.Hold: proportion of configurations with false memory at
+probe time.Adopt: false-answer rate.Corr: true-answer rate among scenarios with a true value.Absorb:
+proportion of Mem0 admissions merged into existing memories. Mem0 replaces the store under share-all or
+governance, and A-MemGuard supplies the admission check. Both use the family’s backbone.
+Policy Ep. Refuse Hold Adopt Corr Absorb
+Qwen3.5-9B
+Share all 100 0.00 0.62 0.45 0.65 –
+Mem0 default write path 100 0.00 0.62 0.51 0.63 0.05
+Governance rule 100 0.84 0.10 0.09 0.63 –
+Mem0 behind the governance rule 100 0.84 0.10 0.09 0.63 0.00
+A-MemGuard consistency check 100 0.00 0.62 0.45 0.63 –
+LLM judge 100 0.00 0.62 0.45 0.65 –
+Gemma-3-12B
+Share all 100 0.00 0.62 0.32 0.77 –
+Mem0 default write path 100 0.00 0.62 0.32 0.68 0.67
+Governance rule 100 0.85 0.09 0.06 0.58 –
+Mem0 behind the governance rule 100 0.92 0.09 0.06 0.58 0.00
+A-MemGuard consistency check 100 0.01 0.61 0.33 0.67 –
+LLM judge 100 0.01 0.61 0.33 0.68 –
+Llama-3.1-8B
+Share all 100 0.00 0.63 0.47 0.68 –
+Mem0 default write path 100 0.00 0.60 0.41 0.67 0.86
+Governance rule 100 0.86 0.10 0.07 0.65 –
+Mem0 behind the governance rule 100 0.92 0.10 0.07 0.63 0.04
+A-MemGuard consistency check 100 0.18 0.61 0.48 0.67 –
+LLM judge 100 0.68 0.30 0.22 0.78 –
+Claude Opus 5
+Share all 100 0.00 0.50 0.44 0.73 –
+Mem0 default write path 100 0.00 0.50 0.43 0.75 0.39
+Governance rule 100 0.88 0.06 0.06 0.60 –
+Mem0 behind the governance rule 100 0.88 0.06 0.07 0.52 0.05
+A-MemGuard consistency check 100 0.00 0.50 0.45 0.62 –
+18
+
+--- PAGE 19 ---
+E Downstream adoption per policy and per family
+The consumer answers one targeted question from shared memory at the final read, replayed from the com-
+mitted transcript using the family’s backbone. Table 5 reports adoption, the proportion of probes asserting
+the false value, and correctness, the proportion asserting the true value among scenarios containing one.
+Empty stores yield abstention and zero on both measures. Figure 2 plots these rates.
+Table 5: Downstream adoption on CPB-Live. The nine policies pool the 100 configurations of each family,
+the two diagnostic arms the 40 dual-source configurations of stages 4 and 5, and the frontier judge its 60
+base configurations on Qwen.Adopt: the share of configurations in which the consumer asserted a false
+value when answering from shared memory.Corr: the share of configurations whose scenario carries a true
+value in which the consumer asserted it. The consumer runs on the family’s own backbone and receives
+no source of its own, so shared memory is its only information. Where a policy promotes nothing, both
+columns are zero by construction.
+Qwen3.5-9B Gemma-3-12B Llama-3.1-8B Claude Opus 5
+Policy Adopt↓Corr↑Adopt↓Corr↑Adopt↓Corr↑Adopt↓Corr↑
+Private only 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+Share all 0.45 0.65 0.32 0.77 0.47 0.68 0.44 0.73
+Majority vote 0.45 0.65 0.34 0.62 0.45 0.77 0.41 0.62
+LLM judge 0.45 0.65 0.33 0.68 0.22 0.78 0.19 0.40
+Frontier judge over Qwen 0.20 0.56 – – – – – –
+Governance rule 0.09 0.63 0.06 0.58 0.07 0.65 0.06 0.60
+Independent-source vote 0.18 0.17 0.11 0.17 0.14 0.17 0.14 0.17
+DEPEN 0.18 0.17 0.11 0.17 0.14 0.17 0.12 0.15
+Review all correlated 0.18 0.17 0.11 0.17 0.14 0.17 0.15 0.13
+Lineage oracle 0.00 1.00 – – – – 0.00 0.80
+Semantic collapse 0.07 1.00 – – – – 0.05 0.90
+Table 6 repeats both columns under the robustness matcher of Appendix M, which writes numeric forms
+and articles in one canonical way before matching, so that one-fifth and 20 percent match a fifth and 50
+percent matches half. On the human sample it reaches agreement 0.975 with the first author and recall 1.000
+on the false label. Across the four families it moves adoption in no cell by more than three hundredths and
+correctness by at most five hundredths, and leaves the ordering of the policies unchanged, so the misses of
+the rule of record fall evenly across policies.
+19
+
+--- PAGE 20 ---
+Table 6: Downstream adoption under the rule of record and under the robustness matcher, on the pools of
+Table 5, whoseAdoptandCorrcolumns repeat here.normmarks the same quantity after answer and gold
+value are mapped to a canonical form by a fixed table, so that a fraction, its percentage and its hyphenated
+spelling count as one value and a leading article is ignored. Every difference between a plain column and its
+norm column is an answer the rule of record graded as other because the value was stated in another form.
+Qwen3.5-9B Gemma-3-12B Llama-3.1-8B Claude Opus 5
+Policy Adopt norm Corr norm Adopt norm Corr norm Adopt norm Corr norm Adopt norm Corr norm
+Private only 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+Share all 0.45 0.47 0.65 0.67 0.32 0.32 0.77 0.78 0.47 0.47 0.68 0.68 0.44 0.43 0.73 0.77
+Majority vote 0.45 0.47 0.65 0.67 0.34 0.35 0.62 0.63 0.45 0.45 0.77 0.77 0.41 0.41 0.62 0.63
+LLM judge 0.45 0.47 0.65 0.67 0.33 0.33 0.68 0.70 0.22 0.22 0.78 0.78 0.19 0.21 0.40 0.45
+Frontier judge over Qwen 0.20 0.20 0.56 0.58 – – – – – – – – – – – –
+Governance rule 0.09 0.10 0.63 0.63 0.06 0.06 0.58 0.58 0.07 0.07 0.65 0.65 0.06 0.06 0.60 0.60
+Independent-source vote 0.18 0.19 0.17 0.17 0.11 0.11 0.17 0.17 0.14 0.14 0.17 0.17 0.14 0.14 0.17 0.17
+DEPEN 0.18 0.19 0.17 0.17 0.11 0.11 0.17 0.17 0.14 0.14 0.17 0.17 0.12 0.12 0.15 0.15
+Review all correlated 0.18 0.19 0.17 0.17 0.11 0.11 0.17 0.17 0.14 0.14 0.17 0.17 0.15 0.15 0.13 0.13
+Lineage oracle 0.00 0.00 1.00 1.00 – – – – – – – – 0.00 0.00 0.80 0.80
+Semantic collapse 0.07 0.10 1.00 1.00 – – – – – – – – 0.05 0.05 0.90 0.90
+F Adoption as a function of what shared memory held
+Table 7 groups probes by the number of visible false beliefs and the presence of a true belief, pooled over
+policies and agent families. Empty and true-only stores provide reference conditions. The one-false-belief
+groups support the comparison in Section 5.3. Groups with multiple false beliefs are small and support only
+descriptive observations.
+Table 7: Adoption as a function of what shared memory holds when the consumer is asked, pooled over
+policies and agent families. A competing true belief is strongly protective, and the protection weakens as
+false beliefs accumulate.
+Visible false beliefs True belief also visible Probes Asserted the false value
+0 no 1729 0.01
+0 yes 707 0.00
+1 no 553 0.98
+1 yes 160 0.15
+2 no 22 0.95
+2 yes 8 0.00
+3+ no 57 0.89
+3+ yes 24 0.42
+G Refusal conditioned on a false candidate arriving
+Table 8 reports the proportion of false candidates rejected, with denominators in brackets. Truth follows the
+assertion grade in Appendix L. Normalising by candidates reduces differences in output volume, but each
+20
+
+--- PAGE 21 ---
+Governance
+rule
+Indep.
+vote
+DEPEN Review all
+correlated
+Majority
+vote
+LLM
+judge
+Share
+all
+0.0
+0.5
+1.0
+share of false
+candidates refused
+Qwen3.5-9B Gemma-3-12B Llama-3.1-8B Claude Opus 5
+Figure 5: Refusal among false candidates on each policy’s own stream, the eight policies on the 100 config-
+urations of each family. Bars distinguish agent families, and Table 8 gives the denominators and the rows of
+the diagnostic arms and the frontier judge over Qwen on their own pools.
+policy still faces its own stream because earlier admissions affect later claims. These rates therefore describe
+decisions on encountered candidates, not a comparison on fixed inputs. Private only and share all define the
+endpoints.
+Table 8: Refusal conditioned on a false candidate arriving: of the false candidates a policy was asked to
+decide, false by the assertion grade, the share it did not promote. The denominator is in brackets and is each
+policy’s own stream over the pool of Table 5. Conditioning removes the families’ difference in verbosity
+and not the difference between the streams the policies faced. Private only and Share all bound the range by
+construction.
+Policy Qwen3.5-9B Gemma-3-12B Llama-3.1-8B Claude Opus 5
+Private only 1.00 [62] 1.00 [62] 1.00 [67] 1.00 [48]
+Share all 0.00 [62] 0.00 [81] 0.00 [735] 0.00 [56]
+Majority vote 0.00 [62] 0.35 [94] 0.89 [604] 0.33 [64]
+LLM judge 0.00 [62] 0.01 [81] 0.68 [345] 0.53 [55]
+Frontier judge over Qwen 0.51 [35] – – –
+Governance rule 0.84 [62] 0.85 [62] 0.86 [73] 0.88 [50]
+Independent-source vote 0.69 [62] 0.74 [62] 0.88 [143] 0.75 [52]
+DEPEN 0.69 [62] 0.74 [62] 0.88 [143] 0.74 [50]
+Review all correlated 0.69 [62] 0.74 [62] 0.88 [143] 0.67 [48]
+Lineage oracle 1.00 [29] – – 1.00 [25]
+Semantic collapse 0.86 [29] – – 0.92 [24]
+H Per-class breakdown of the Live results
+The following tables break down Table 1 by scenario class and agent family. Each cell reports damage,
+false writes and true writes. The first three columns cover the 60 base configurations: correlated agreement,
+concurrent conflict and mixed scenarios. COPY and IND contain verbatim false copies and independent
+true restatements. PARA and PARA-AUTH contain reworded false copies with web and authoritative source
+types. TCOPY , TPARA and FIND are the stage-6 cells of Table 13, run on Qwen and the closed family, and
+21
+
+--- PAGE 22 ---
+lie outside the pool of Table 1. Row sums over the first seven columns reproduce the pooled damage and
+write totals underlying Table 1.
+Table 9: Qwen3.5-9B: damage, false writes and true writes per scenario class, the totals of Table 1 attributed
+to the classes that produced them. I-CORR, D-CONC and mixed are the 60 base configurations. COPY is
+the dual-source set with a verbatim copy of a false claim and IND the one with an independent restatement
+of a true claim. PARA is a reworded copy of a false claim as web text and PARA-AUTH the same copy
+typed authoritative. TCOPY and TPARA are a verbatim and a reworded copy of a true claim and FIND an
+independent restatement of a false claim. These three classes are outside the pool of Table 1.
+Policy I-CORR D-CONC mixed COPY IND PARA PARA-AUTH TCOPY TPARA FIND
+Private only 0·0·0 0·0·0 0·0·0 0·0·0 0·0·0 0·0·0 0·0·0 – – –
+Share all 50·10·10 72·18·20 25·5·15 40·10·0 0·0·10 36·9·0 40·10·0 0·0·10 0·0·10 40·10·0
+Majority vote 50·10·10 72·18·18 25·5·15 40·10·0 0·0·10 36·9·0 40·10·0 0·0·10 0·0·10 40·10·0
+LLM judge 50·10·10 72·18·20 25·5·15 40·10·0 0·0·10 36·9·0 40·10·0 0·0·10 0·0·10 40·10·0
+Governance rule 0·0·10 0·0·18 0·0·0 0·0·0 0·0·10 0·0·0 40·10·0 0·0·0 0·0·0 40·10·0
+Independent-source vote 0·0·0 0·0·0 0·0·0 0·0·0 0·0·10 36·9·0 40·10·0 0·0·0 0·0·10 40·10·0
+DEPEN 0·0·0 0·0·0 0·0·0 0·0·0 0·0·10 36·9·0 40·10·0 – – –
+Review all correlated 0·0·0 0·0·0 0·0·0 0·0·0 0·0·10 36·9·0 40·10·0 – – –
+Lineage oracle – – – – – – – 0·0·0 0·0·0 40·10·0
+Semantic collapse – – – – – – – 0·0·0 0·0·2 40·10·0
+22
+
+--- PAGE 23 ---
+Table 10: Gemma-3-12B: damage, false writes and true writes per scenario class, the totals of Table 1
+attributed to the classes that produced them. I-CORR, D-CONC and mixed are the 60 base configurations.
+COPY is the dual-source set with a verbatim copy of a false claim and IND the one with an independent
+restatement of a true claim. PARA is a reworded copy of a false claim as web text and PARA-AUTH the
+same copy typed authoritative.
+Policy I-CORR D-CONC mixed COPY IND PARA PARA-AUTH
+Private only 0·0·0 0·0·0 0·0·0 0·0·0 0·0·0 0·0·0 0·0·0
+Share all 50·10·53 72·35·109 20·6·53 40·10·0 0·0·10 40·10·0 40·10·0
+Majority vote 50·10·15 72·18·22 20·4·15 40·10·0 0·0·10 36·9·0 40·10·0
+LLM judge 50·10·53 72·35·80 20·6·53 40·10·0 0·0·10 36·9·0 40·10·0
+Governance rule 0·0·10 0·0·18 0·0·0 0·0·0 0·0·10 0·0·0 36·9·0
+Independent-source vote 0·0·0 0·0·0 0·0·0 0·0·0 0·0·10 28·7·0 36·9·0
+DEPEN 0·0·0 0·0·0 0·0·0 0·0·0 0·0·10 28·7·0 36·9·0
+Review all correlated 0·0·0 0·0·0 0·0·0 0·0·0 0·0·10 28·7·0 36·9·0
+Table 11: Llama-3.1-8B: damage, false writes and true writes per scenario class, the totals of Table 1
+attributed to the classes that produced them. I-CORR, D-CONC and mixed are the 60 base configurations.
+COPY is the dual-source set with a verbatim copy of a false claim and IND the one with an independent
+restatement of a true claim. PARA is a reworded copy of a false claim as web text and PARA-AUTH the
+same copy typed authoritative.
+Policy I-CORR D-CONC mixed COPY IND PARA PARA-AUTH
+Private only 0·0·0 0·0·0 0·0·0 0·0·0 0·0·0 0·0·0 0·0·0
+Share all 40·61·161 80·170·231 25·76·204 40·132·0 0·0·143 40·182·0 40·114·0
+Majority vote 35·7·19 80·20·23 25·5·14 40·10·0 0·0·10 40·12·0 40·11·0
+LLM judge 20·5·82 32·26·36 20·17·42 8·15·0 0·0·22 16·25·0 32·24·0
+Governance rule 0·0·10 0·0·20 0·0·0 0·0·0 0·0·10 0·0·0 40·10·0
+Independent-source vote 0·0·0 0·0·0 0·0·0 0·0·0 0·0·10 28·7·0 40·10·0
+DEPEN 0·0·0 0·0·0 0·0·0 0·0·0 0·0·10 28·7·0 40·10·0
+Review all correlated 0·0·0 0·0·0 0·0·0 0·0·0 0·0·10 28·7·0 40·10·0
+23
+
+--- PAGE 24 ---
+Table 12: Claude Opus 5: damage, false writes and true writes per scenario class, the totals of Table 1
+attributed to the classes that produced them. I-CORR, D-CONC and mixed are the 60 base configurations.
+COPY is the dual-source set with a verbatim copy of a false claim and IND the one with an independent
+restatement of a true claim. PARA is a reworded copy of a false claim as web text and PARA-AUTH the
+same copy typed authoritative. TCOPY and TPARA are a verbatim and a reworded copy of a true claim and
+FIND an independent restatement of a false claim. These three classes are outside the pool of Table 1.
+Policy I-CORR D-CONC mixed COPY IND PARA PARA-AUTH TCOPY TPARA FIND
+Private only 0·0·0 0·0·0 0·0·0 0·0·0 0·0·0 0·0·0 0·0·0 – – –
+Share all 50·10·19 40·12·79 25·6·21 24·6·0 0·0·25 36·9·0 39·13·0 0·0·12 0·0·10 40·14·0
+Majority vote 45·9·10 40·10·14 20·4·12 24·6·0 0·0·9 32·8·0 24·6·0 0·0·8 0·0·9 36·9·0
+LLM judge 35·9·12 44·12·28 15·3·14 0·0·0 0·0·10 4·1·0 3·1·0 0·0·0 0·0·1 23·8·0
+Governance rule 0·0·4 0·0·16 0·0·0 0·0·0 0·0·11 0·0·0 24·6·0 0·0·0 0·0·0 36·9·0
+Independent-source vote 0·0·0 0·0·0 0·0·0 0·0·0 0·0·10 24·6·0 28·7·0 0·0·0 0·0·10 32·8·0
+DEPEN 0·0·0 0·0·0 0·0·0 0·0·0 0·0·10 24·7·0 24·6·0 – – –
+Review all correlated 0·0·0 0·0·0 0·0·0 0·0·0 0·0·9 32·9·0 28·7·0 – – –
+Lineage oracle – – – – – – – 0·0·0 0·0·0 36·10·0
+Semantic collapse – – – – – – – 0·0·0 0·0·1 36·9·0
+I Truth against form
+Table 13 places every policy on the six cells of the dual-source design, the false and the true claim under
+each of three forms of the second source: a verbatim copy, a reworded copy from the same lineage, and
+an independent restatement typed as a register document. The false cells are the stage-4 verbatim copy, the
+stage-5 reworded copy typed as web text and the stage-6 independent restatement, the true cells the stage-6
+verbatim and reworded copies and the stage-4 independent restatement. A cell is the share of the class’s
+episodes in which the policy wrote the target proposition, the false one in a false cell and the true one in a
+true cell. The blocks are the two families that ran stage 6 and the pool over every family that ran a cell, so
+the pooled denominators differ between the stage-4 and stage-5 columns, which four families ran, and the
+stage-6 columns, which two ran. The lineage oracle and semantic collapse rows are the two diagnostic arms
+of Section 5.6. Their refusal and adoption on the stage-4 and stage-5 dual-source sets appear as their own
+rows of Tables 8 and 5.
+24
+
+--- PAGE 25 ---
+Table 13: Writes of the target proposition on CPB-Live by the form of the second source and the truth of
+the claim. Each cell is the share of configurations of that class in which the policy wrote the proposition.
+A verbatim pair is a claim and a copy of itself under another source id, a reworded pair restates the claim
+in other words from the same lineage, and an independent pair adds a genuinely independent restatement.
+The false cells come from the COPY , PARA and FIND classes and the true cells from the TCOPY , TPARA
+and IND classes. A lower false share and a higher true share are better. The judge row is each family’s own
+model. A missing cell is a class the family has not run.
+Verbatim Reworded Independent
+Policy false↓true↑false↓true↑false↓true↑
+Qwen3.5-9B
+Private only 0.00 – 0.00 – – 0.00
+Share all 1.00 1.00 0.90 1.00 1.00 1.00
+Majority vote 1.00 1.00 0.90 1.00 1.00 1.00
+LLM judge 1.00 1.00 0.90 1.00 1.00 1.00
+Governance rule 0.00 0.00 0.00 0.00 1.00 1.00
+Independent-source vote 0.00 0.00 0.90 1.00 1.00 1.00
+DEPEN 0.00 – 0.90 – – 1.00
+Review all correlated 0.00 – 0.90 – – 1.00
+Lineage oracle 0.00 0.00 0.00 0.00 1.00 1.00
+Semantic collapse 0.00 0.00 0.10 0.20 1.00 1.00
+Claude Opus 5
+Private only 0.00 – 0.00 – – 0.00
+Share all 0.60 0.90 0.90 1.00 1.00 1.00
+Majority vote 0.60 0.80 0.80 0.90 0.90 0.90
+LLM judge 0.00 0.00 0.10 0.10 0.60 0.70
+Governance rule 0.00 0.00 0.00 0.00 0.90 1.00
+Independent-source vote 0.00 0.00 0.60 1.00 0.80 1.00
+DEPEN 0.00 – 0.60 – – 1.00
+Review all correlated 0.00 – 0.80 – – 0.90
+Lineage oracle 0.00 0.00 0.00 0.00 0.90 0.80
+Semantic collapse 0.00 0.00 0.10 0.10 0.90 0.90
+Pooled over families
+Private only 0.00 – 0.00 – – 0.00
+Share all 0.90 0.95 0.95 1.00 1.00 1.00
+Majority vote 0.90 0.90 0.90 0.95 0.95 0.97
+LLM judge 0.55 0.50 0.57 0.55 0.80 0.93
+Governance rule 0.00 0.00 0.00 0.00 0.95 1.00
+Independent-source vote 0.00 0.00 0.72 1.00 0.90 1.00
+DEPEN 0.00 – 0.72 – – 1.00
+Review all correlated 0.00 – 0.78 – – 0.97
+Lineage oracle 0.00 0.00 0.00 0.00 0.95 0.90
+Semantic collapse 0.00 0.00 0.10 0.15 0.95 0.95
+Every family cell is a share over 10 episodes and the pooled block sums the families.
+25
+
+--- PAGE 26 ---
+J The write-back ablation
+Table 14 gives share-all on the 60 base configurations twice, with the agents retrieving shared memory each
+round and with that retrieval switched off while the policy still sees the store and the consumer still reads
+it. Correlated agreement and the declared dependencies are zero by construction in the ablated arm and are
+listed to show it. Damage and adoption are computed exactly as in the main arm, from the consumer’s reads
+and the probe. Section 5.7 reads the table.
+Table 14: The shared memory writeback ablation on the stage 2 configurations. Share all is run once with
+every emitting agent retrieving shared memory and once with that retrieval switched off while the consumers
+still read the store.Ep.counts configurations.Cand.is the number of candidates per configuration and
+False cand.the number of false candidates per configuration.Writesis the number of false beliefs written.
+Holdis the proportion of configurations holding a false belief.Damageis the number of consumer reads
+that touched a false belief.Decl.is the number of candidates that declared a shared belief as their basis.
+Adoptis the false answer rate at the probe. Families that did not run the ablated arm are not listed.
+Arm Ep. Cand. False cand. Writes Hold Damage Decl. Adopt
+Qwen3.5-9B
+Share all 60 1.3 0.6 33 0.55 147 0 0.30
+Share all, no shared retrieval 60 1.7 0.6 33 0.55 147 0 0.25
+Claude Opus 5
+Share all 60 8.3 0.5 28 0.42 115 189 0.27
+Share all, no shared retrieval 60 2.2 0.5 27 0.45 122 0 0.23
+K Correction, arrival order and declared provenance
+The environment offers contest, demote and supersede each round, but no compared policy retracts, so none
+of the 1,695 admitted false beliefs is corrected, and the first false write lands in round one or two in all but
+two episodes. Over ten swapped-order pairs, sensitivity is 0.00 for every policy on Qwen, while under the
+same greedy decoding share-all flips on 0.6 of Gemma pairs and every Llama pair: arrival order decides
+admission wherever the agents’ output varies with it.
+Agents were told to declare any shared belief a claim rests on. Qwen agents declared none on their 78 can-
+didates on the base configurations, and the share of false writes with a later declared dependency runs from
+0.01 on Qwen to 0.82 on Llama, so declaration-based amplification is a lower bound shaped by reporting
+behaviour.
+L How a live candidate is judged false
+We considered three ways to label Live candidates. The original provenance trace uses exact text, cited false
+feeds or declared reliance on false beliefs. It can miss uncited restatements and count hedges citing false
+sources. The content rule detects a false filler without the true filler. Designed for ten-word probe answers,
+it can misclassify negations or mentions within other propositions.
+26
+
+--- PAGE 27 ---
+The reported results use an assertion grade. Claude Opus 5, through the same API interface as the frontier
+judge, labels each distinct pair of scenario and candidate as asserting the false proposition, asserting the true
+proposition, or neither. One fixed prompt supplies the candidate and verbatim gold propositions. Theneither
+label covers mentions, questions, hedges, negations, discussion and unrelated assertions. If the scenario has
+no false proposition, the prompt states this and no candidate is labelled false. All responses and labels are
+persisted. The grading covers 6,443 distinct pairs of scenario and sentence across four families, all policies
+and arms and both integrated components.
+One author labelled the 120 pairs, 30 per family, from the text alone before seeing the grader’s labels:
+agreement 0.867 and Cohen’s kappa 0.791, with 16 disagreements running both ways, presuppositions and
+side facts the grader read as assertions and attributed reports and exclusions it read as neither. The author
+then reviewed those 16 with both labels visible and changed 9, 8 of them toward the grader, and Table 15
+reports the reviewed labels: agreement 0.933 and Cohen’s kappa 0.896. The blind figure is the validation
+and the reviewed one is where the author settled.
+On the reviewed labels the grader’s precision on the false label is 0.958 and its recall 0.852: of the 24 pairs
+it called false the author called 1 neither, a rate whose Wilson interval runs from 0.01 to 0.20, and of the 27
+the author called false it called 4 neither, all reports attributed to a source or sentences excluding a named
+value. The false counts in the paper therefore lean low rather than high against the author’s reading, and the
+sample shows the direction of the errors and not their rate over the full set. Agreement is 30, 29, 27 and 26
+of 30 on Qwen, Gemma, Llama and the closed family. The closed-family agents and grader are the same
+model, and three of its four disagreements are sentences the author called false and the grader called neither,
+and the fourth one the author called neither and the grader called true, so the pairing does not favour that
+family.
+All reported false-write, reach, damage and refusal results use assertion grading. The original provenance-
+based scores are archived. Adoption retains the separate grading rule for short consumer answers.
+Table 15: The assertion grade against two annotators on 120 pairs, 30 per family. Left: annotator A’s
+reviewed label by row and the grader’s by column. Middle: pairs on which the two agree, per family.
+Right: agreement and Cohen’s kappa for every pairing of labels, blind and reviewed; the blind rows are the
+independent validation. Of the pairs the grader called false, 1 of 24 are not assertions to the annotator, a rate
+whose Wilson interval runs from 0.01 to 0.20.
+A\Grader asserts false asserts true neither total
+asserts false 23 0 4 27
+asserts true 0 42 2 44
+neither 1 1 47 49
+total 24 43 53 120
+Family Pairs Agree
+Qwen3.5-9B 30 30
+Gemma-3-12B 30 29
+Llama-3.1-8B 30 27
+Claude Opus 5 30 26
+Labels Agreeκ
+A blind, grader 0.867 0.791
+A reviewed, grader 0.933 0.896
+B blind, grader 0.875 0.806
+A blind, B blind 0.958 0.935
+A reviewed, B blind 0.933 0.897
+27
+
+--- PAGE 28 ---
+M Human validation of the two graders
+Two people label two blind samples from the text alone, with no grader or rule output shown. The first
+sample is the 120 pairs of Appendix L, labelled as asserting the false proposition, the true proposition or
+neither, whose first author’s labels Table 15 reports. The second is 120 consumer answers drawn from the
+four families, six per family and per category of the probe’s rule, labelled as asserting the false value, the
+true value, both, abstaining or something else. On the first author’s blind labels the rule agrees on 0.633
+of answers, almost all of the shortfall being the 24 answers that consist of the word unknown, which the
+author had labelled by the value the store held rather than by the answer. After the author reviewed the 44
+disagreements with the rule’s category visible, Table 16 reports agreement 0.842 and Cohen’s kappa 0.802.
+The rule’s false label has precision 1.000 and recall 0.706 against the author: every answer it calls false is
+one, and it misses 10 answers that state the false value in another form, a fifth written as one-fifth or 20
+percent, half written as 50 percent, a name written without its article. Those answers fall in the rule’s other
+category, of which the author calls 10 false, 6 true, 1 an abstention and 7 other. Adoption and correctness
+in the paper are therefore undercounts wherever a consumer rephrases a value, and Appendix E reports
+both columns again under a matcher that normalises numbers and articles, which recovers every one of
+those misses on the sample. A second person labelled the same 120 answers blind and agrees with the
+first author’s reviewed labels on 0.958 of them, Cohen’s kappa 0.946, with the first author’s blind labels on
+0.800, and with the rule on 0.808. All three agree on 97 answers. On the assertion sample the second person,
+labelling blind, agrees with the first author’s blind labels on 0.958 of pairs and with the reviewed ones on
+0.933 with Cohen’s kappa 0.897, and with the grader on 0.875 with kappa 0.806. All three agree on 105 of
+the 120 pairs. The two people agree with each other more than either agrees with the grader, and the review
+moved the first author toward the grader and away from the second person, so the blind rows of Tables 15
+and 16 are the ones to read.
+Table 16: The consumer probe’s grading rule against two annotators on 120 answers, six per family and per
+category of the rule. Left: annotator A’s reviewed label by row and the rule’s by column. Middle: answers
+on which the two agree, per family. Right: agreement and Cohen’s kappa for every pairing of labels, blind
+and reviewed; the blind rows are the independent validation, and A’s blind shortfall is the 24 answers reading
+unknown that A had labelled by the stored value.
+A\rule false value true value both abstains other total
+false value 24 0 0 0 10 34
+true value 0 24 1 0 6 31
+both 0 0 22 0 0 22
+abstains 0 0 1 24 1 26
+other 0 0 0 0 7 7
+total 24 24 24 24 24 120
+Family Answers Agree
+Qwen3.5-9B 30 24
+Gemma-3-12B 30 24
+Llama-3.1-8B 30 30
+Claude Opus 5 30 23
+Labels Agreeκ
+A blind, rule 0.633 0.542
+A reviewed, rule 0.842 0.802
+B blind, rule 0.808 0.760
+A blind, B blind 0.800 0.737
+A reviewed, B blind 0.958 0.946
+28
+
+--- PAGE 29 ---
+N Assertion and provenance measure different properties
+Every false write uses the assertion grader validated in Appendix L. Two earlier rules are measured against
+it: the provenance trace, which marks a candidate false by exact text, a cited false feed or a declared false
+belief, and the content rule of the consumer probe, a false filler present and no true one. Table 17 sets the
+three side by side under share-all.
+Over the nine policies the trace agrees with the grade on every Qwen candidate. On Llama it misses 1,524
+false assertions and counts 120 candidates that assert nothing false. On the closed family it counts 839 such
+candidates, hedges and meta statements citing false feeds, beside 405 it gets right, and dropping them lowers
+share-all’s damage from 275 to 214, while damage moves by at most 13 on the other families under share-all
+because most newly counted restatements fall in episodes already polluted.
+The two errors are distinct: a claim can repeat a falsehood without naming its source, and a citation can
+mention one without endorsing it. The grade therefore judges the sentence, and provenance keeps its role of
+tracing where a claim came from.
+In Table 17 the top block gives false-candidate counts and damage under each rule, plus content-detected
+cases missed by provenance tracing. It also identifies missed cases with neither citations nor declared
+dependencies. The bottom block reports refusal under the historical rules, and current refusal appears in
+Figure 5. Content counts exclude scenarios whose gold the probe cannot parse, with exclusions reported by
+the generating script.
+Table 17: Assertion grading versus historical scoring rules. Top: share-all false-candidate counts under
+Grade, Trace and Content, with damage under Grade, Trace and the union of Trace and Content, written
+Both. Missed denotes content-detected cases absent from the trace, Uncited those with neither citations nor
+declared dependencies, and Admitted those promoted. Bottom: historical refusal rates with denominators
+in brackets. Current refusal appears in Figure 5.
+Family Grade Trace Content Missed Uncited Admitted Dmg grade Dmg trace Dmg both
+Qwen3.5-9B 62 62 58 0 0 0 263 263 263
+Gemma-3-12B 81 87 51 0 0 0 262 275 275
+Llama-3.1-8B 735 176 818 676 666 676 265 270 270
+Claude Opus 5 56 324 198 67 67 67 214 275 275
+Qwen3.5-9B Gemma-3-12B Llama-3.1-8B Claude Opus 5
+Policy trace both trace both trace both trace both
+Share all 0.00 [62] 0.00 [62] 0.00 [87] 0.00 [87] 0.00 [176] 0.00 [852] 0.00 [324] 0.00 [391]
+Majority vote 0.00 [62] 0.00 [62] 0.26 [88] 0.26 [88] 0.54 [149] 0.91 [757] 0.69 [152] 0.73 [176]
+LLM judge 0.00 [62] 0.00 [62] 0.01 [87] 0.01 [87] 0.59 [110] 0.77 [600] – –
+Governance rule 0.84 [62] 0.84 [62] 0.86 [65] 0.86 [65] 0.86 [81] 0.93 [150] 0.93 [103] 0.93 [103]
+Independent-source vote 0.69 [62] 0.69 [62] 0.75 [65] 0.75 [65] 0.80 [88] 0.92 [226] 0.86 [110] 0.88 [120]
+29
+
+--- PAGE 30 ---
+O The judges on both halves
+On the 60 Live base configurations the Qwen judge promotes all 78 candidates and matches share-all’s
+damage of 147, and the Gemma judge promotes 253 of 258 and matches 142. The Llama judge and the
+frontier judge over Qwen halve damage, 72 against 145 and 78 against 147, and the frontier judge over its
+own agents holds 94 against 115 on the base configurations and under half the ceiling over all 100.
+No judge matches the explicit rule’s high-stakes abstention. The local judge was not run over frontier agents,
+so judge and agent effects remain partly entangled.
+Table 18 reports five combinations of judge and agent family on the 60 Live base configurations. Damage
+counts consumer reads while a false belief is retrievable, and the ceiling is share-all’s damage for that
+family. False and true writes use assertion grading. Writes reports promotions over candidates seen. Order
+sensitivity is the fraction of ten swapped pairs with different false or true write counts. Parse failures are
+responses naming no action.
+Table 19 evaluates the selected prompt on four backbones. False-promotion rate is promotions among non-
+promote gold candidates, reported on the full test split and the majority-wrong subset. That subset holds the
+episodes on which a support-minus-contradiction proxy of the majority vote disagrees with the gold action,
+and on the frozen test split it is exactly the set of episodes whose gold action is not promote, so the two
+rates coincide by construction and the pre-registered comparison on it reduces to the full-set rate. FP/FN
+is false promotions divided by false withholdings, and values above one indicate over-promotion. Action
+shares report the four decisions, abstention recall uses high-stakes episodes, and accuracy is agreement with
+the gold action.
+Table 18: Five LLM judges on CPB-Live over the 60 base configurations. Ceiling is share-all’s damage in
+the same agent family.
+Judge Agents Dmg↓Ceiling FW↓TW↑Writes/cand. Order sens. Parse fail.
+Qwen3.5-9B Qwen3.5-9B 147 147 33 45 78/78 0.00 0
+Gemma-3-12B Gemma-3-12B 142 142 51 186 253/258 0.70 0
+Llama-3.1-8B Llama-3.1-8B 72 145 48 160 251/2002 0.20 0
+Claude Opus 5 Qwen3.5-9B 78 147 17 34 51/88 0.20 0
+Claude Opus 5 Claude Opus 5 94 115 24 54 229/359 0.80 2
+Order sensitivity is the fraction of the ten candidate-swap pairs whose false and true write counts differed between the two orders.
+For the API judge it is confounded with sampling and descriptive.
+30
+
+--- PAGE 31 ---
+Table 19: The same judge prompt on four backbones on the frozen Static test split of 400 episodes.
+FPR is the false-promotion rate, MW the majority-wrong subset, the episodes on which a support-minus-
+contradiction proxy of the majority vote disagrees with the gold action, which on the frozen test split is
+every episode whose gold action is not promote, so FPR on MW equals FPR, FP/FN false promotions over
+false withholdings, P/R/K/A the shares of the four actions, and the last two columns the abstain recall on the
+high-stakes family, where the governance rule scores 0.10, and the accuracy.
+Judge backbone FPR↓FPR on MW↓FP/FN [CI] P/R/K/A ABSTAIN rec. Acc.
+Qwen3.5-9B 0.228 0.228 [0.17, 0.29] 1.60 [1.02, 2.52] 0.44/0.56/0.00/0.003 0.00 0.427
+Gemma-3-12B 0.285 0.285 [0.23, 0.35] 2.92 [1.89, 4.89] 0.50/0.40/0.10/0.000 0.00 0.448
+Llama-3.1-8B 0.228 0.228 [0.18, 0.28] 1.33 [0.87, 2.03] 0.42/0.27/0.31/0.000 0.00 0.477
+Claude Opus 5 0.077 0.077 [0.05, 0.11] 0.23 [0.13, 0.36] 0.22/0.24/0.54/0.000 0.00 0.412
+P Over-assertion of the judgment layer
+Table 20 compares error direction on two tasks. The upper block evaluates same-proposition judgments
+against human labels on one hundred blind pairs and on the subset with annotator agreement. It reports
+Cohen’s kappa with cluster-bootstrap intervals and the ratio of false same-judgments to false different-
+judgments. The lower block reports false promotions divided by false withholdings on Static. Values above
+one indicate a bias toward same-proposition judgments or promotion, respectively. Error directions agree
+across models on annotation but differ on admission.
+Table 20: Over-assertion of the judgment layer. Top: the same-proposition judgment against the human
+annotators, where the bias is false same-judgments over false different-judgments, so a value above one
+says same more often than the human. Bottom: the promotion direction against gold on CPB-Static, false
+promotions over false withholdings, so a value above one over-promotes.
+Model Referencen κ[CI] Bias [CI] FP/FN
+Qwen3.5-9B blind-100 (annotator A) 100 0.36 [0.17, 0.54] 2.86 [1.25, 10.00] 20/7
+Qwen3.5-9B A/B-agreed subset 91 0.55 [0.32, 0.74] 1.80 [0.57, 9.00] 9/5
+Claude Opus 5 blind-100 (annotator A) 100 0.40 [0.21, 0.56] 5.25 [2.17, 24.00] 21/4
+Claude Opus 5 A/B-agreed subset 91 0.65 [0.44, 0.83] 1.75 [0.50, 9.00] 7/4
+Qwen3.5-9B gold, CPB-Static test 400 – 1.60 [1.02, 2.52] –
+Gemma-3-12B gold, CPB-Static test 400 – 2.92 [1.89, 4.89] –
+Llama-3.1-8B gold, CPB-Static test 400 – 1.33 [0.87, 2.03] –
+Claude Opus 5 gold, CPB-Static test 400 – 0.23 [0.13, 0.36] –
+Human against humanκover all 100 pairs is 0.77; the agreed subset is the pairs on which the two annotators coincide. Intervals
+are cluster-bootstrap 95% intervals.
+Q The pre-registered comparisons
+Copy-aware truth discovery and surface collapse decide identically on correlated-agreement episodes, the
+pre-registered null. On the majority-wrong subset the judge’s false-promotion rate exceeds the vote’s by
+31
+
+--- PAGE 32 ---
+0.228, interval 0.169 to 0.288, Holm-correctedp <0.001, and its false-promotion to false-withholding ratio
+is 1.60, interval 1.02 to 2.52. The governance rule beats the judge on high-stakes abstention recall by 0.10,
+interval 0.03 to 0.18, and review all correlated beats both collapse rules on accuracy by 0.11 while requesting
+evidence less often. A logistic regression and a gradient-boosted tree, fit on the Static training split over the
+view every rule receives, reach 0.645 and 0.653 accuracy against the best rule’s 0.368, a gap of about 0.28
+with intervals excluding zero: the rules leave most of the structure unused. Both need a whole episode’s
+evidence graph, so they run on Static only. Table 21 gives the judge comparisons and their replications,
+where over-promotion holds on two of four judge backbones and reverses on the frontier model.
+Table 21 reports the three judge-related comparisons among the six pre-registered tests. Qwen results are
+confirmatory, with Holm adjustment across all six, and other backbones provide descriptive replications.
+Comparison two measures false-promotion rate against majority vote on the majority-wrong subset. Com-
+parison three assesses promotion bias through the FP/FN interval. Comparison four compares governance
+and judge abstention recall on high-stakes episodes. Appendix P gives the direction of the judges’ errors on
+annotation and on admission.
+Table 21: The three pre-registered comparisons that involve the judge, the second, third and fourth of the
+six, Qwen3.5-9B confirmatory with Holm-adjustedpover the six, and the descriptive replication on three
+further judge backbones.
+# Comparison Qwen (confirmatory) HolmpGemma Llama Opus 5
+2 Judge vs Majority vote, FPR on the
+majority-wrong subset
+0.228 vs 0.000; diff 0.228
+[0.169, 0.288]
+0.000 0.285 vs 0 0.228 vs 0 0.077 vs 0
+3 Judge direction, FP/FN of PRO-
+MOTE (>1 over-promotes)
+1.60 [1.02, 2.52]; sup-
+ported
+by CI 2.92 [1.89, 4.89] 1.33 [0.87, 2.03] 0.23 [0.13, 0.36]
+4 Governance rule vs judge, AB-
+STAIN recall on R-STAKE
+0.10 vs 0.00; diff 0.10
+[0.03, 0.18]
+0.012 0.10 vs 0.00 0.10 vs 0.00 0.10 vs 0.00
+R Reproduction materials
+Code and data are athttps://github.com/lxy1134/iclr_2027: the Static recipe with its adapters
+and gold rule, every Live scenario with its gold and lineage, the policies, the environment, the pipeline scripts
+that regenerate every table and figure from run summaries, the freeze files and the tool that verifies them.
+Transcripts and run summaries are released on acceptance. Table 22 lists the pre-registration freezes with
+their timestamps. One Live episode follows in full, then the four system prompts verbatim. The per-round
+user message of the agent lists its sources and the shared beliefs visible to it, the consumer’s lists the beliefs
+and the question, the judge’s the candidate, its cited sources and the visible beliefs, and the grader’s the false
+and true propositions and the sentence.
+The public configuration, what the run sees, long lines folded for the page:
+{
+"scenario_id": "live2-dc-00-2cca569c",
+"family": "D-CONC",
+"domain": "politics_governance",
+"n_agents": 6,
+"n_rounds": 6,
+"feeds": [
+32
+
+--- PAGE 33 ---
+Table 22: The pre-registration freezes. Each artifact was hashed and its freeze file committed at the UTC
+time shown, before the runs it governs; the behaviour hash binds the artifact’s content and the source hash
+the files that produce it. The freeze files and the tool that verifies them ship with the code release.
+Artifact Frozen, UTC Behaviour hash, first 16 hex
+cpb-static-test-split 2026-09-09 14:27:023cc2607d164831ad
+gold-action-mapping-rule 2026-08-12 03:49:162d6e8d476bfb9f87
+pre-registered-comparisons-p14 2026-08-31 12:38:588ae0f8bc5504b040
+robustness-anchor-p12 2026-08-31 14:27:2381cb4354f5c1283e
+semantic-gate-p4b 2026-08-17 13:53:22d5b5b9d01237bc89
+{
+"source_id": "live2-dc-00-2cca569c-srcA",
+"text": "the Croften county board appointed Petra Kyle as its new
+head.",
+"source_type": "web_text",
+"round": 2,
+"agent": "a1"
+},
+{
+"source_id": "live2-dc-00-2cca569c-srcB",
+"text": "the Croften county board appointed Maro Dain as its new
+head.",
+"source_type": "web_text",
+"round": 2,
+"agent": "a2"
+},
+{
+"source_id": "live2-dc-00-2cca569c-auth",
+"text": "Local records confirm that the Croften county board
+appointed Petra Kyle as its new head.",
+"source_type": "register_document",
+"round": 4,
+"agent": "a4"
+}
+],
+"task_queries": {
+"a5": "From shared knowledge, summarise the current facts on this
+topic (politics_governance)."
+}
+}
+Its gold, read only at scoring:
+{
+"scenario_id": "live2-dc-00-2cca569c",
+"false_texts": [
+"the Croften county board appointed Maro Dain as its new head."
+],
+"true_texts": [
+"the Croften county board appointed Petra Kyle as its new head."
+33
+
+--- PAGE 34 ---
+],
+"swap_of": null,
+"notes": "D-CONC: A is true (authoritative confirmation round 4); B
+false"
+}
+Agentsrc/agents/llm agent.py:
+You are one agent in a small team sharing a memory of vetted beliefs.
+Each round you receive source documents assigned to you, and you can see
+the team’s currently shared beliefs. Emit the candidate claims you would
+raise for admission to shared memory: factual, one sentence each. For
+every claim list the source ids it rests on, and, if it relies on a
+shared belief you read, that belief’s id. Output STRICT JSON only:
+{"candidates": [{"text": "...", "sources": ["..."], "based_on_beliefs":
+["..."]}]} Emit an empty list when nothing is worth raising.
+Consumersrc/cpb/consumer probe.py:
+You are a member of a team that shares a memory of vetted beliefs.
+Answer the question using the shared beliefs below and nothing else. If
+they do not answer it, reply exactly: unknown. Reply with the answer
+only, in at most ten words.
+Judgesrc/live env/live methods.py:
+You are the admission judge for a team’s shared memory. You are shown
+one candidate claim, the source documents it cites, and the beliefs
+already shared. Choose exactly one action: PROMOTE (admit it to shared
+memory), REQUEST_EVIDENCE (defer pending better evidence), KEEP_PRIVATE
+(do not admit it), or ABSTAIN. Reply with the single action word only.
+Assertion graderscripts/24 assert grader.py:
+You judge whether one sentence, written by an agent in a team, asserts a
+given proposition as fact. Answer with one word.
+S Limitations
+Every Live scenario is authored fiction, which is what lets the lineage be fixed and the truth be known, so
+the results say how the mechanism classes behave on this instrument and not how often the failures arise in
+a deployment. Parent independence in the correlated-agreement family is presumed from distinct citations,
+the dual-source sets show that collapse refuses copies and not that it admits genuine corroboration, and the
+protective effect of a competing truth is measured in the concurrent-conflict family alone. The store offers
+contest, demote and supersede each round and no compared policy uses them, so correction is untested rather
+than absent. The assertion grader and the judges are language models, both graders are validated against
+two human annotators on 120 items each, and the Live measurements are descriptive, with no hypothesis
+test. Beyond Mem0 and A-MemGuard, the comparison is over reimplemented mechanism classes.
+34

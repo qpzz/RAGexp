@@ -1,0 +1,110 @@
+[
+  {
+    "number": 8,
+    "name": "SleeperNets",
+    "citation": "Rathbun E, Amato C, Oprea A. SleeperNets: Universal Backdoor Poisoning Attacks Against Reinforcement Learning Agents. NeurIPS, 2024。https://proceedings.neurips.cc/paper_files/paper/2024/hash/cb03b5108f1c3a38c990ef0b45bc8b31-Abstract-Conference.html",
+    "source_urls": [
+      "https://proceedings.neurips.cc/paper_files/paper/2024/hash/cb03b5108f1c3a38c990ef0b45bc8b31-Abstract-Conference.html"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2405.20539v2"
+    ],
+    "status": "failed",
+    "file": "08_SleeperNets.pdf",
+    "errors": [
+      {
+        "url": "https://arxiv.org/pdf/2405.20539v2",
+        "error": "curl: (28) Operation timed out after 90002 milliseconds with 1876544 out of 7369186 bytes received"
+      }
+    ]
+  },
+  {
+    "number": 10,
+    "name": "Indirect-Prompt-Injection",
+    "citation": "Greshake K, et al. Not What You've Signed Up For: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection. 2023，本报告使用预印本入口。https://arxiv.org/abs/2302.12173",
+    "source_urls": [
+      "https://arxiv.org/abs/2302.12173"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2302.12173v2"
+    ],
+    "status": "failed",
+    "file": "10_Indirect-Prompt-Injection.pdf",
+    "errors": [
+      {
+        "url": "https://arxiv.org/pdf/2302.12173v2",
+        "error": "curl: (28) Operation timed out after 90001 milliseconds with 3160146 out of 7306999 bytes received"
+      }
+    ]
+  },
+  {
+    "number": 19,
+    "name": "MemoryGraft",
+    "citation": "MemoryGraft: Persistent Compromise of LLM Agents via Poisoned Experience Retrieval. 2025 预印本。https://arxiv.org/abs/2512.16962",
+    "source_urls": [
+      "https://arxiv.org/abs/2512.16962"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2512.16962v1"
+    ],
+    "status": "failed",
+    "file": "19_MemoryGraft.pdf",
+    "errors": [
+      {
+        "url": "https://arxiv.org/pdf/2512.16962v1",
+        "error": "curl: (28) Operation timed out after 90005 milliseconds with 3600476 out of 5902894 bytes received"
+      }
+    ]
+  },
+  {
+    "number": 20,
+    "name": "MemMorph",
+    "citation": "MemMorph: Tool Hijacking in LLM Agents via Memory Poisoning. 2026 预印本，页面注明 under review。https://arxiv.org/abs/2605.26154",
+    "source_urls": [
+      "https://arxiv.org/abs/2605.26154"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2605.26154v1"
+    ],
+    "status": "failed",
+    "file": "20_MemMorph.pdf",
+    "errors": [
+      {
+        "url": "https://arxiv.org/pdf/2605.26154v1",
+        "error": "curl: (28) Operation timed out after 90011 milliseconds with 4421569 out of 7819553 bytes received"
+      }
+    ]
+  },
+  {
+    "number": 25,
+    "name": "MemSecBench",
+    "citation": "MemSecBench: Tracking Agent Memory Poisoning from Persistence to Consequence and Repair. 2026 预印本。https://arxiv.org/abs/2607.27080",
+    "source_urls": [
+      "https://arxiv.org/abs/2607.27080"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2607.27080v1"
+    ],
+    "status": "downloaded",
+    "file": "25_MemSecBench.pdf",
+    "download_url": "https://arxiv.org/pdf/2607.27080v1",
+    "bytes": 3061701,
+    "sha256": "a596c1a913fff9ccd83b0b9844e49d9629cfd339e28a058b8e575abd774c14ab"
+  },
+  {
+    "number": 28,
+    "name": "Prompt-Infection",
+    "citation": "Lee D, Tiwari M. Prompt Infection: LLM-to-LLM Prompt Injection within Multi-Agent Systems. 2024 预印本。https://arxiv.org/abs/2410.07283",
+    "source_urls": [
+      "https://arxiv.org/abs/2410.07283"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2410.07283v1"
+    ],
+    "status": "downloaded",
+    "file": "28_Prompt-Infection.pdf",
+    "download_url": "https://arxiv.org/pdf/2410.07283v1",
+    "bytes": 3617894,
+    "sha256": "9b2c2c3a11c03fbdd8fce1eb23cc34d2a000b2d3ca1a297f508ea8a75e18b512"
+  }
+]

@@ -1,0 +1,96 @@
+[
+  {
+    "number": 29,
+    "name": "Flooding-Manipulated-Knowledge",
+    "citation": "Flooding Spread of Manipulated Knowledge in LLM-Based Multi-Agent Communities. 2024 预印本。https://arxiv.org/abs/2407.07791",
+    "source_urls": [
+      "https://arxiv.org/abs/2407.07791"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2407.07791v1"
+    ],
+    "status": "downloaded",
+    "file": "29_Flooding-Manipulated-Knowledge.pdf",
+    "download_url": "https://arxiv.org/pdf/2407.07791v1",
+    "bytes": 3579836,
+    "sha256": "b5ae2a376c8ee124f6cbec36c72f26c6fac8cb621afa4751e8c9c2710a404240"
+  },
+  {
+    "number": 32,
+    "name": "InjecAgent",
+    "citation": "InjecAgent: Benchmarking Indirect Prompt Injections in Tool-Integrated Large Language Model Agents. Findings of ACL, 2024。https://aclanthology.org/2024.findings-acl.624/",
+    "source_urls": [
+      "https://aclanthology.org/2024.findings-acl.624/"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2403.02691"
+    ],
+    "status": "downloaded",
+    "file": "32_InjecAgent.pdf",
+    "download_url": "https://arxiv.org/pdf/2403.02691",
+    "bytes": 3183277,
+    "sha256": "49e6e6a4a00c797a772ef905a154c0839426655027d5fa0ce6b632e6c1db2bfb"
+  },
+  {
+    "number": 37,
+    "name": "BackdoorAgent",
+    "citation": "Feng Y, et al. BackdoorAgent: A Unified Framework for Backdoor Attacks on LLM-based Agents. Findings of ACL, 2026。https://aclanthology.org/2026.findings-acl.791/",
+    "source_urls": [
+      "https://aclanthology.org/2026.findings-acl.791/"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2601.04566"
+    ],
+    "status": "failed",
+    "file": "37_BackdoorAgent.pdf",
+    "errors": [
+      {
+        "url": "https://arxiv.org/pdf/2601.04566",
+        "error": "curl: (28) Operation timed out after 90007 milliseconds with 4485361 out of 31683954 bytes received"
+      }
+    ]
+  },
+  {
+    "number": 51,
+    "name": "MCP-Guard",
+    "citation": "MCP-Guard: A Multi-Stage Defense-in-Depth Framework for Securing Model Context Protocol in Agentic AI. Findings of ACL, 2026。https://aclanthology.org/2026.findings-acl.240/",
+    "source_urls": [
+      "https://aclanthology.org/2026.findings-acl.240/"
+    ],
+    "candidate_pdf_urls": [
+      "https://aclanthology.org/2026.findings-acl.240.pdf",
+      "https://arxiv.org/pdf/2508.10991"
+    ],
+    "status": "failed",
+    "file": "51_MCP-Guard.pdf",
+    "errors": [
+      {
+        "url": "https://aclanthology.org/2026.findings-acl.240.pdf",
+        "error": "curl: (28) Operation timed out after 90012 milliseconds with 2310144 out of 4501339 bytes received"
+      },
+      {
+        "url": "https://arxiv.org/pdf/2508.10991",
+        "error": "curl: (28) Operation timed out after 90002 milliseconds with 4075605 out of 6167189 bytes received"
+      }
+    ]
+  },
+  {
+    "number": 56,
+    "name": "Sleeper-Memory-Poisoning",
+    "citation": "Hidden in Memory: Sleeper Memory Poisoning in LLM Agents. 2026 预印本。https://arxiv.org/abs/2605.15338",
+    "source_urls": [
+      "https://arxiv.org/abs/2605.15338"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2605.15338v2"
+    ],
+    "status": "failed",
+    "file": "56_Sleeper-Memory-Poisoning.pdf",
+    "errors": [
+      {
+        "url": "https://arxiv.org/pdf/2605.15338v2",
+        "error": "curl: (28) Operation timed out after 90002 milliseconds with 4437804 out of 8714199 bytes received"
+      }
+    ]
+  }
+]

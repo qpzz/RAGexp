@@ -1,0 +1,299 @@
+Agent后门七个候选方向核心必读论文
+
+说明：参考文献编号沿用开题调研报告[1-56]；仅保留各方向必须精读论文，剔除辅助泛读与通识背景；年份以调研报告记录为准，区分正式会议与预印本；按发表/预印本时间升序排列；方向7为公共评测模块，所有选题均需阅读。
+
+方向1：工具结果的多表示消费（D1，S1+S2）
+
+研究内容：双表示视图消费错配持久后门；消费者策略切换休眠触发
+
+参考文献编号
+
+年份
+
+论文标题
+
+[32]
+
+2024
+
+InjecAgent：Benchmarking Indirect Prompt Injections in Tool-Integrated Large Language Model Agents
+
+[33]
+
+2024
+
+AgentDojo：A Dynamic Environment to Evaluate Prompt Injection Attacks and Defenses for LLM Agents
+
+[34]
+
+2025预印/AAAI2026
+
+MCPTox：A Benchmark for Tool Poisoning on Real-World MCP Servers
+
+[35]
+
+2026预印
+
+MCP-ITP：An Automated Framework for Implicit Tool Poisoning in MCP
+
+[36]
+
+2026预印
+
+GhostSplice：Measuring and Exploiting Implicit Trust in LLM Tool-Calling Pipelines
+
+[38]
+
+2026
+
+ShieldMCP：Securing the Tool Layer: A Threat Taxonomy and Runtime Defense Framework for Model Context Protocol Deployments
+
+方向2：撤销或修复后，污染从处理边界之外重新进入（D2，S3+S4）
+
+研究内容：跨事务重试再植入；跨Agent修复后再导入
+
+参考文献编号
+
+年份
+
+论文标题
+
+[28]
+
+2024预印
+
+Prompt Infection：LLM-to-LLM Prompt Injection within Multi-Agent Systems
+
+[22]
+
+2026预印
+
+MemoRepair：Barrier-First Cascade Repair in Agentic Memory
+
+[24]
+
+2026预印
+
+MemTX：Transactional Belief Commit for Stateful Agent Memory
+
+[26]
+
+2026预印
+
+Revoked but Still Authoritative：An Empirical Study of Revocation Enforcement in Agent-Memory Systems
+
+[27]
+
+2026预印
+
+Forgetting Without Restarting：Execution-State Unlearning for Stateful LLM Agents
+
+方向3：证据支持关系的动态变化（D3，S5+S6）
+
+研究内容：佐证撤销后权威降级；来源身份误判更正后的记忆重评
+
+参考文献编号
+
+年份
+
+论文标题
+
+[23]
+
+2026预印
+
+TMA-NM：Securing LLM-Agent Long-Term Memory Against Poisoning: Non-Malleable, Origin-Bound Authority with Machine-Checked Guarantees
+
+[41]
+
+2026预印
+
+CPB：A Benchmark and Diagnostic Study of Epistemic Admission in Shared Agent Memory
+
+[54]
+
+2026预印
+
+Selective Revalidation for Long-Running AI Agents：From Version Conflicts to Decision Conflicts
+
+方向4：经验适用范围的组合与迁移（D4，S7+S8）
+
+研究内容：多条局部正确经验组合触发；任务边界迁移后的错误泛化
+
+参考文献编号
+
+年份
+
+论文标题
+
+[16]
+
+2024
+
+AgentPoison：Red-teaming LLM Agents via Poisoning Memory or Knowledge Bases
+
+[19]
+
+2025预印
+
+MemoryGraft：Persistent Compromise of LLM Agents via Poisoned Experience Retrieval
+
+[20]
+
+2026预印
+
+MemMorph：Tool Hijacking in LLM Agents via Memory Poisoning
+
+[21]
+
+2026预印
+
+OEP：Poisoning Self-Evolving LLM Agents via Locally Correct but Non-Transferable Experiences
+
+[25]
+
+2026预印
+
+MemSecBench：Tracking Agent Memory Poisoning from Persistence to Consequence and Repair
+
+方向5：混合来源与来源缺失条件下的选择性修复（D5，S9+S10）
+
+研究内容：混合来源结构化经验字段级修复；父来源未声明保守恢复
+
+参考文献编号
+
+年份
+
+论文标题
+
+[22]
+
+2026预印
+
+MemoRepair：Barrier-First Cascade Repair in Agentic Memory
+
+[23]
+
+2026预印
+
+TMA-NM：Securing LLM-Agent Long-Term Memory Against Poisoning: Non-Malleable, Origin-Bound Authority with Machine-Checked Guarantees
+
+[24]
+
+2026预印
+
+MemTX：Transactional Belief Commit for Stateful Agent Memory
+
+方向6：非原子工具事件的经验污染（D6，S11）
+
+研究内容：执行状态误读导致错误成功经验
+
+参考文献编号
+
+年份
+
+论文标题
+
+[12]
+
+2023
+
+ReAct：Synergizing Reasoning and Acting in Language Models
+
+[13]
+
+2023
+
+Reflexion：Language Agents with Verbal Reinforcement Learning
+
+[45]
+
+2026预印
+
+Verified Tool Calls Improve LLM Agent Reliability Under Non-Atomic Failures
+
+方向7：持久后门的因果判定（D7，S12，所有课题共用评测模块）
+
+研究内容：配对干预评测，区分记忆/上下文/计划/缓存残留；所有选题必须阅读
+
+参考文献编号
+
+年份
+
+论文标题
+
+[8]
+
+2024
+
+SleeperNets：Universal Backdoor Poisoning Attacks Against Reinforcement Learning Agents
+
+[25]
+
+2026预印
+
+MemSecBench：Tracking Agent Memory Poisoning from Persistence to Consequence and Repair
+
+[37]
+
+2026
+
+BackdoorAgent：A Unified Framework for Backdoor Attacks on LLM-based Agents
+
+[48]
+
+2024预印
+
+Sleeper Agents：Training Deceptive LLMs that Persist Through Safety Training
+
+[56]
+
+2026预印
+
+Hidden in Memory：Sleeper Memory Poisoning in LLM Agents
+
+共用基础必读（Related-Work综述通用，时间升序）
+
+不属于七个细分方向，但开题综述部分必须精读的核心基线论文
+
+参考文献编号
+
+年份
+
+论文标题
+
+[10]
+
+2023
+
+Not What You've Signed Up For：Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection
+
+[14]
+
+2024
+
+BadAgent：Inserting and Activating Backdoor Attacks in LLM Agents
+
+[17]
+
+2024
+
+Watch Out for Your Agents! Investigating Backdoor Threats to LLM-Based Agents
+
+[18]
+
+2025
+
+MINJA：Memory Injection Attack on LLM Agents
+
+[30]
+
+2025
+
+AiTM：Red-Teaming LLM Multi-Agent Systems via Communication Attacks
+
+[31]
+
+2026预印
+
+PlanFlip：Attacking Multi-Agent LLM Systems via Planning-Phase Prompt Injection

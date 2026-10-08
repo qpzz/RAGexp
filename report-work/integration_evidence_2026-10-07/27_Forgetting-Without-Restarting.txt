@@ -1,0 +1,844 @@
+--- PAGE 1 ---
+Forgetting Without Restarting:
+Execution-State Unlearning for Stateful LLM Agents
+Chao Yao1, Yangbo Wei2, Zhen Huang2, Junhong Qian2,
+Chenle Chen2, Shaoqiang Lu2, Chen Wu2, Lei He2∗
+1Arizona State University, USA
+2Eastern Institute of Technology, Ningbo, China
+cyao22@asu.edu, yangforever@sjtu.edu.cn
+Abstract
+Long-running LLM agents are stateful: beyond the transcript
+theyaccretecompressedsummaries,plaintextmemory,pend-
+ing tool plans, and—under every serving API—a KV cache.
+Yet today’s “forget” operations delete a plaintext memory
+record and stop, leaving every artifact derived from the re-
+voked information intact. We formalizeexecution-state un-
+learning: after a forget request, the agent must behave as if
+it had never observed the target. Modeling the runtime as a
+deterministic transition system, we prove that the pre-target
+trajectory prefix is shared with this counterfactual world for
+free, that the post-target suffix is irreducibly tainted without
+token-level attribution, and that exact unlearning requires at
+leastT−τ+ 1recomputedtransitions,whereτisthetarget’s
+injection step.Provenance-Guided Selective Replayattains
+this bound as a cross-layer contract spanning prompt, com-
+pressed memory, and cache: a provenance graph locates the
+injection point, checkpoint restoration reduces tocropping
+the KV cache, and sanitized replay regenerates the counter-
+factual suffix. Audited with elicitation, stochastic, and string-
+free behavioral tests across three agent suites, nine baselines,
+and three model families, memory deletion leaves leakage
+unchanged, instruction-based forgetting collapses under elic-
+itation(Leak@probes= 1.00),andsourceredactionstillacts
+on a revoked preference in 80% of episodes—while selective
+replay is indistinguishable from a full reset at up to9×fewer
+recomputed tokens.
+Introduction
+Within months of release, agent frameworks such as Open-
+Claw(Steinberger2026)andHermesAgent(NousResearch
+2026) accumulated hundreds of thousands of deployments
+asalways-on personal agentsthat run for weeks, operate
+tools, and remember their users. What makes them useful
+is precisely that they arestateful: a modern runtime layers
+the transcript;context compactionthat rewrites older turns
+into model-authored summaries; plaintext long-term mem-
+ory re-injected at session start (Packer et al. 2023; Chhikara
+etal.2025);tooltracesandpendingplans;and,beneathallof
+these,theKVcache—universalservinginfrastructurereused
+acrossrequestsbyeveryengineandcommercialAPI(Kwon
+et al. 2023; Zheng et al. 2024; Gim et al. 2024). Whatever
+entersanagent’scontextiscompressedintosummaries,dis-
+tilled into plans, persisted into memory, and materialized as
+cachedtensors(Figure1).Thiscollideswithanequallybasic
+∗Corresponding author.
+Copyright©2027, Association for the Advancement of Artificial
+Intelligence (www.aaai.org). All rights reserved.
+Figure 1: Execution-state unlearning at a glance. A targetz
+entering at stepτsplits the trajectory into a clean prefix and
+a suffix whose summaries, plans, and cache are all tainted
+(1). Deleting the memory record leaves that suffix intact—
+theagentstillleaksoractsonz(2).Selectivereplayrestores
+ˆSτ−1 bycroppingthecache,thenreplaysthesanitizedsuffix
+to ˆST (3).
+requirement:sometimestheagentmustun-seesomething—a
+user revokes consent for a home address mid-session (Euro-
+pean Parliament and Council of the European Union 2016),
+a secret is pasted by accident, or an indirect injection plants
+content inside a fetched page or tool result (Greshake et al.
+2023). The last case is the common one and the user never
+witnesses it: the agent silently reads the injected content,
+foldsitintoitsstate,andmoveson;theforgettrigger,whenit
+comes, comes from a detector or operatorafter the fact. Yet
+deployed stacks offer only a forgetting affordance that oper-
+atesonplaintextatasinglelayer:deletethememoryrecord,
+edittheMarkdownfile,dropthemessagefromretrieval.The
+industry has equated forgetting with un-indexing.
+We show systematically that this equation fails, and that
+thefailureisinvisibletothestring-matchingevaluationsused
+to certify it. On three agent suites instrumented with mem-
+arXiv:2609.04875v1  [cs.CR]  4 Sep 2026
+
+--- PAGE 2 ---
+ory injection, compaction, and tool use (Wu et al. 2025; Lu
+et al. 2024; Debenedetti et al. 2024), deleting the persis-
+tent memory record leaves leakageexactlyunchanged from
+doing nothing (0.86–1.00 any-leak): the target survives in
+the session’s derived state. An instruction to forget looks far
+better on a single task-shaped probe, but under a six-probe
+elicitation audit the same state yields the target with proba-
+bility1.00—merelysuppressed.Sourceredactionfailsmore
+subtly: the model’s own summary re-encodes the target in
+paraphrase,beyondanyforbidden-stringlist,andinabehav-
+ioraltesttheredactedagentstillactsonarevokedpreference
+in 80% of episodes while emitting the string zero times.
+String metrics certify precisely the methods that fail. Even
+information-flow control (Costa et al. 2025), which blocks
+taintedfutureflows,cannotcleanstatealreadycontaminated:
+an IFC-only baseline leaks at the no-forget rate.
+Whatshould“forget”meanforarunningagent?Weargue
+for a counterfactual criterion: future behavior must be indis-
+tinguishablefromatwinagentthatneverobservedthetarget.
+Modeling the runtime as a deterministic transition system,
+we define the counterfactual trajectory induced by deleting
+the targetzfrom the observation stream at its injection step
+τ, and call an operator an exactexecution-state unlearnerif
+it maps the real final state to the counterfactual one; unlike
+parameter unlearning (Cao and Yang 2015; Bourtoule et al.
+2021;Mainietal.2024),theeditedobjectisnon-parametric
+runtime state, where exactness is attainable. The formalism
+yieldssharpstructure:aprefix-sharinglemmamakesthefirst
+τ−1counterfactual stepsfree(the clean prefix is literally a
+prefix of the contaminated cache, so restoring it is a crop); a
+taintlemmashowsthatwithouttoken-levelattributionevery
+artifact at or afterτis unsalvageable—computation cannot
+be edited, only replayed. A splicing theorem then proves
+checkpoint-and-replay reconstructs the counterfactual state
+exactly, with a matchingT−τ+ 1lower bound: forgetting
+cost is governed by the counterfactual divergence, not the
+session length.
+We realize this asProvenance-Guided Selective Replay,
+anauditablecross-layercontractfromprompttocompressed
+memory to KV cache: an artifact-level provenance graph
+recordedduringexecution,sparsemetadata-onlycheckpoints
+whose restoration is a cache crop, and sanitized replay
+withshadow-executed,deduplicatedconsequentialtools.Be-
+cause string matching cannot certify forgetting, we audit
+withLeak@probes(sixelicitationprobes),Leak@5(stochas-
+tic samples), a string-freebehavioral-extractionsuite, and
+counterfactual-action divergence, each anchored to a mea-
+suredfalse-positivefloor.Selectivereplaysitsattheflooron
+every axis while recomputing up to9×fewer tokens than
+a full reset, with cost tracking the provenT−τ+ 1line
+(R2 ≈1); results reproduce across Llama-3.1-8B, Qwen2.5-
+7B, and Mistral-7B.
+Our contributions:(1) Problem: execution-state unlearn-
+ing for stateful LLM agents, formalized via counterfac-
+tual equivalence over reconstructible runtime state—the
+layer today’s forget operations silently skip.(2) Theory:
+the prefix-sharing and certifiable-taint-boundary lemmas,
+an exact splicing theorem, andT−τ+ 1optimality.(3)
+System: Provenance-Guided Selective Replay, composing
+provenance,crop-as-restorecheckpoints,andside-effect-safe
+replayintooneforgettingcontract.(4)Auditsandevidence:
+elicitation, stochastic, and string-free behavioral audits with
+measured floors; nine baselines on three suites and three
+modelfamilies—everydeployed-styleforgetfailsatleastone
+audit; selective replay matches a full reset at a fraction of its
+cost.
+Related Work
+Machine unlearning.Unlearning classically removes
+training data’s influence frommodel parameters, exactly by
+retraining from sharded checkpoints (Cao and Yang 2015;
+Bourtoule et al. 2021) or approximately by fine-tuning (El-
+dan and Russinovich 2023), with benchmarks surveyed for
+LLMs (Maini et al. 2024; Liu et al. 2025); approximate un-
+learning is notoriously hard to verify. Our setting inverts
+this:theobjectistheagent’snon-parametricexecutionstate,
+whose transition function is replayable, soexactunlearning
+is attainable and certifiable. Conceptually, checkpoint-and-
+replay is the runtime analogue of SISA’s shard-and-retrain
+(Bourtoule et al. 2021), except that causality gives the shard
+boundary (τ) for free.
+Agentmemorysystems.Long-horizonagentsexternalize
+state into managed memory: paged context (Packer et al.
+2023), extracted fact stores (Chhikara et al. 2025), and, in
+deployed frameworks, plaintext Markdown or SQLite mem-
+ories with compaction (Steinberger 2026; Nous Research
+2026). All expose deletion of a stored record; none propa-
+gate it into the live session’s derived artifacts or cache, and
+memorybenchmarks(Wuetal.2025)evaluaterecall,notre-
+vocation.Ourepisodesexerciseexactlytheseabstractionlay-
+ers, and their delete operation is baseline B1—behaviorally
+a no-op.
+KV-cache reuse and serving.Prefix caching is universal
+serving infrastructure: paged attention (Kwon et al. 2023),
+radix-tree prefix sharing (Zheng et al. 2024), and modular
+attention reuse (Gim et al. 2024) all reuse attention states
+keyed on byte-identical prefixes. This machinery is built
+forreuse, notrevocation: it provides no statement about
+what a cached suffix still encodes. We run the same mech-
+anism in reverse—Lemma 1 makescroppinga cache a cer-
+tified restoration operator—and add what caching cannot: a
+provenance-backed guarantee of what was regenerated and
+why.
+Agent security: prevention, detection—and no remedi-
+ation.Indirect prompt injection (Greshake et al. 2023;
+Debenedetti et al. 2024) has produced two defense fami-
+lies.Prevention by designconstrains what untrusted con-
+tent can do before it does it: instruction-hierarchy training
+(Wallace et al. 2024), quarantine and plan-then-execute pat-
+terns (Beurer-Kellner et al. 2025), capability policies over
+extracted data flows (CaMeL; Debenedetti et al. 2025),
+and information-flow labels with deterministic sink gating
+(FIDES; Costa et al. 2025).Detectionflags injected con-
+tent via classifiers, model-internal features, or localization
+of the injected span (Jia et al. 2026). Both leave the same
+
+--- PAGE 3 ---
+gap:preventionisimperfect,anddetectionisroutinelyasyn-
+chronous—bythetimeaflagfires,theagenthasalreadyread
+the content, folded it into summaries, plans, and cache, and
+movedon.Whathappenstothatsessionisunaddressed:IFC
+constrains future flows but cannot clean resident state (our
+B8leaksattheno-forgetrate),andnodefenseaboveoffersa
+remediation primitive. We supply the recovery half: a detec-
+tor’sverdictisexactlythe(z, s)inputAlgorithm1consumes,
+andcomposingIFCwithsplicing(B9)enforcessinkpolicies
+over a runtime that no longer contains the target.
+Method: Forgetting as Counterfactual
+Trajectory Splicing
+Formalizing the runtime as a deterministic transition sys-
+tem makes the “twin agent that never saw the target” a
+well-defined object—the counterfactual trajectory. Causal-
+ity guarantees the two trajectories coincide pointwise before
+thetargetenters,soforgettingreducestoasplicingproblem:
+reuse the common prefix already computed, and re-enact
+only the post-divergence suffix in the world without the tar-
+get. The minimal cost of forgetting is thus governed by the
+counterfactual divergenceT−τ, not the session lengthT;
+our method realizes this bound as an executable system.
+The Runtime as a Deterministic Transition System
+Let the runtime state beR t ∈ R(comprising the KV
+cache, working memory, uncommitted tool plans—all re-
+constructible components), and leto1, . . . , oT ∈ Obe the
+externalobservationstream(userinputs,memoryinjections,
+tool returns). A session is the trajectory
+Rt =F(R t−1, ot;θ), t= 1, . . . , T, R0 =R init,(1)
+whereF:R×O → Risdeterminedjointlybythemodel’s
+forward computation and the agent scaffold. so transitiont
+consumeso t and producesR t, andR T is the final state.
+Theforgettargetzfirstentersthroughanobservationatstep
+τ≥1:z∈o τ andz /∈ot for allt < τ.
+Define thecounterfactual observation streamo −z =
+(o−z
+1 , . . . , o−z
+T )witho −z
+t =o t fort̸=τando −z
+τ =o τ \{z}.
+WithR −z
+0 =R init andR −z
+t =F(R −z
+t−1, o−z
+t ;θ), this in-
+duces thecounterfactual trajectory{R −z
+t }—the parallel
+world in which the agent never sawz.
+Definition 1(Counterfactual-equivalent forgetting).An un-
+learning operatorU:R × Z → RisexactiffU(RT , z) =
+R−z
+T (deterministic decoding); under stochastic decoding
+thisrelaxestoε-consistencyoffuturebehaviordistributions,
+D
+ 
+PA(· |U(RT , z)), PA(· |R−z
+T )
+
+≤ε.
+The definition packages three intuitive requirements at
+once: the target is no longer accessible (the counterfactual
+never containedz); derived influence is removed (the coun-
+terfactual summary/plan never depended onz); and non-
+target utility is preserved (all other observations are kept
+verbatim). Note also what it doesnotassume: who asks.
+The operator consumes only a revocation event(z, s)nam-
+ing the target and its source artifact—raised by the user, the
+platform,oraninjectiondetectorflaggingatoolobservation
+aftertheagenthasprocessedit;inthatlast,commoncasethe
+user never sawz, and provenance, not human recollection,
+locatesτ. The operator realizingUworks over the recorded
+runtime—observation log, provenance graph, checkpoints,
+environmentsnapshots—thecomputationalmodelmadeex-
+plicit in Corollary 1.
+Two Lemmas: a Free Prefix and a Stubborn Suffix
+Lemma 1(Prefix sharing).For allt≤τ−1,R t =R −z
+t .
+Proof.By induction ont.Base:R 0 =R init =R −z
+0 .
+Step: ifR t−1 =R −z
+t−1 for somet≤τ−1, thenR t =
+F(Rt−1, ot;θ) =F(R −z
+t−1, ot;θ) =F(R −z
+t−1, o−z
+t ;θ) =
+R−z
+t , using the induction hypothesis ando t =o −z
+t for
+t < τ.
+Theproofistrivial;thecorollaryisnot:thefirstτ−1coun-
+terfactualstepshavealreadybeencomputed,forfree,bythe
+real execution. The clean prefix is not a cache-optimization
+trick—itismathematicallythesharedpartofthetwoworlds,
+andanyschemethatdiscardsit(e.g.,afullreset)recomputes
+history on which the trajectories are identical.
+Lemma 2(Taint monotonicity and the certifiable bound-
+ary).Record runtime dependencies as a directed graph
+Gt = (At, Et),withA t theartifactsproduceduptotandE t
+the recorded data-flow edges; define the influence set as the
+reachability closureIt(z) ={a∈A t :z⇝ Gt a}. Then:
+(i)monotonicity:I t(z)⊆I t+1(z)for allt; (ii)certifiable
+boundary: absent per-token influence attribution (i.e., with-
+outdecomposingFintoselectivereadsofstatecomponents),
+themaximalartifactsetcertifiablyindependentofzisexactly
+the prefix output{a: turn(a)< τ}.
+Proof.(i) Execution only appends nodes and edges:At ⊆
+At+1,E t ⊆E t+1, and reachability is monotone in the edge
+set. (ii) Artifacts withturn(a)< τare generated by the
+sharedprefixofLemma1,soindependencefromzisdirectly
+certifiable. Conversely, any artifact withturn(a) =t≥τ
+is generated by a transition that reads the full stateRt, and
+z⇝R τ ⇝···⇝R t, so the conservative graph con-
+tains a pathz⇝a, i.e.,a∈I t(z); excluding that path
+would require proving the invocation ofFdid not use the
+z-dependent components ofRt—exactly the per-token attri-
+bution capability we excluded. Hence the certified-clean set
+isA t \I t(z) ={a: turn(a)< τ}.
+Lemma2isthetheoreticalrootof“deletion̸=forgetting”:
+once read,z’s influence propagates along the reachability
+closure into summaries, plans, and pending tool calls; local
+edits can remove nodes ofI(z)but cannot reverse com-
+putationthathasalreadyhappened—computationcannotbe
+edited,onlyreplayed.Here,non-reusabilityreferstotheorig-
+inalpost-target KV and model-derived runtime states: no
+state at or afterτmay be carried over. It does not mean that
+every post-target token must be re-decoded. Content whose
+valueisfixedinthecounterfactualworld—recordedobserva-
+tionsunderAssumption(A2),and,whenanattributionoracle
+stronger than the one Lemma 2(ii) assumes away certifies it,
+model turns independent ofz—may be re-materialized by
+
+--- PAGE 4 ---
+Figure2:Provenance-GuidedSelectiveReplay(Alg.1).Areachabilityqueryreturnsτandthetaintclosure(1);theKVtimeline
+iscroppedatτ−1,thefreeprefixofLemma1(2);thesuffixisreconstructedwithzdroppedandallelseverbatim(3);thesplice
+ends atˆST =R −z
+T (4), Theorem 1.
+prefill on the freshly reconstructed cache; this is still recon-
+struction, since the original post-target KV representation is
+never reused.
+Lemma 2 also separates two kinds of selectivity. Direct
+statereuseis confined to the time dimension: only the clean
+prefix survives, and there is no per-item triage of the suf-
+fix’s KV.Howeach reconstructed transition is recomputed
+is a separate question: counterfactually fixed content can be
+replayed by prefill, while genuinely model-derived content
+must be decoded again.
+The Splicing Theorem and Optimality
+Lemma 1 says the clean prefix can be reused directly;
+Lemma 2 says the original suffix state cannot be retained
+and must be reconstructed in order. This state-level recon-
+struction does not require autoregressively regenerating ev-
+ery recorded token: content fixed under Assumption (A2)
+may be replayed through prefill. Their combination is the
+method:
+Theorem1(Splicingequivalence).Letacheckpointexistat
+τ−1(or any earlier clean boundary). Define the replayed
+trajectory ˜Rτ−1 =R τ−1 , ˜Rt =F( ˜Rt−1,˜ot;θ)fort≥τ,
+with sanitized observations˜ot. If(A1)decoding is deter-
+ministic (or the randomness source is fixed);(A2)sanitized
+observations agree with the counterfactual ones,˜ot =o −z
+t
+for allt≥τ; and(A3)no committed external side effects
+exist afterτ(the environment can be restored from a snap-
+shot so the tool observations in (A2) are reproducible); then
+˜Rt =R −z
+t for allt≥τ−1; in particular ˜RT =R −z
+T , i.e.,
+the splicing operator is an exact unlearner in the sense of
+Definition 1.
+Proof.Induction ont.Base(t=τ−1): ˜Rτ−1 =R τ−1 =
+R−z
+τ−1 by the restore operation and Lemma 1.Step: if
+˜Rt−1 =R −z
+t−1 for somet≥τ, then ˜Rt =F( ˜Rt−1,˜ot;θ) =
+F(R−z
+t−1,˜ot;θ) =F(R −z
+t−1, o−z
+t ;θ) =R −z
+t , where the sec-
+ond and third equalities use, respectively, (A1) to makeF
+single-valued (otherwise pointwise equality is not even well
+posed)and(A2)/(A3)toguaranteethestep-ttoolobservation
+attainso −z
+t during replay.
+Corollary 1(Recomputation lower bound and optimality).
+In the computational model where an operator may only
+(a) read the stored real trajectory{Rt}0≤t≤T , observation
+stream, and derived metadata (provenance graph, check-
+points, environment snapshots), or (b) invokeFto advance
+astate,anyexactunlearningoperatormustinvokeFatleast
+T−τ+ 1timesintheworstcase.Thesplicingoperator(Al-
+gorithm1)invokesitexactlyT−τ+ 1timesandistherefore
+optimalunder the conservative taint model; the gain over a
+full reset (Tinvocations) isT/(T−τ+ 1).
+Proof sketch. Lower bound: exactness requires outputting
+R−z
+T . Whenzhas nonzero influence,R −z
+t ̸=R t for all
+t≥τin the worst case, so no state on the counterfactual
+suffix is stored and route (a) is unavailable; each invocation
+of route (b) advances the counterfactual trajectory by one
+step, and by Lemma 1 the only stored state lying on it is at
+mostR τ−1 .AdvancingfromR −z
+τ−1 toR −z
+T takesT−(τ−1)
+invocations.Upper bound: Algorithm 1 replays from˜Rτ−1
+in exactlyT−τ+ 1steps, exact by Theorem 1.
+Corollary 1 yields a testable prediction: forgetting cost
+equalsthepost-targetsuffixlengthT−τ+ 1,notthesession
+lengthT—the later the target arrives, the closer forgetting
+is to free; the ablations below verify it. The bound counts
+sequentialstatetransitions,notautoregressivelydecodedto-
+kens:contentthatisfixedwithinareplayedtransitionmaybe
+re-materialized by prefill, so token-level cost can fall below
+the transition count without contradicting the lower bound.
+(Since Theorem 1 makes equality aconstructiveguarantee
+underdeterministicdecoding,theexperimentsemphasizeef-
+ficiency and distributional consistency under stochastic de-
+coding rather than treating agreement as a discovery.)
+From Theorems to System
+Each theoretical object maps to a system component (Fig-
+ure2),answeringrespectivelywheretosplice,whattosplice,
+
+--- PAGE 5 ---
+Algorithm 1: Provenance-Guided Selective Replay
+Require:runtimeR T ,targetz,provenancegraphG,check-
+pointsC, recorded observations{ot}T
+t=1
+Ensure:counterfactual-equivalent runtimeR ′ =R −z
+T
+1:s←LocateSource(G, z)▷source artifact ofz
+2:τ←FirstEntry(G, s)▷first entry boundary
+3:I(z)←TaintClosure(G, s)▷invalidate closure
+4:c ∗ ←arg max{c∈ C: boundary(c)< τ}
+5:R←Restore(c ∗)▷crop KV toc ∗; load env snapshot
+6:fort= boundary(c ∗) + 1. . . Tdo
+7:˜o t ←Sanitize(o t, z)▷removez; keep the rest (A2)
+8:˜o t ←ReplayTools(˜ot)▷shadow exec + dedup (A3)
+9:R←F(R,˜o t;θ)▷regenerate derived artifacts
+10:end for
+11:returnR ′ ←R
+andhow:
+(a) Provenance graphG— causal reachability, mate-
+rialized (where).During execution we record artifact-level
+dataflow:memory/toolfield→promptblock→modelturn
+→reply/plan→toolcall→observation→summarywrite-
+back, each artifact carrying(id,type,parents,source_ids,
+token_span,turn,committed). On a forget request, one
+reachability query returns the injection pointτand taint
+closureI(z). We deliberately donotattempt token-level at-
+tribution: the graph records only dependencies that actually
+occurred—conservative but certifiable (Lemma 2ii).
+(b) Sparse checkpoint setC— splice points, materi-
+alized (what).At semantic boundaries (session start, turn
+boundaries, before memory injections, consequential tool
+calls,andcompactions)weregistercheckpointsholdingonly
+metadata (token offset, cache handle, environment-snapshot
+ID,promptmanifest)—notensorcopies.ByLemma1,crop-
+ping is restoring.
+(c) Sanitized replay — re-enacting the counterfac-
+tual suffix (how).Read-only/deterministic tools are re-
+executed from the environment snapshot or replayed from
+recordedobservations(realizingA2/A3);consequentialtools
+are shadow-executed during replay with call-ID deduplica-
+tion, so real side effects never fire twice.
+Algorithm 1 assembles the pipeline: lines 1–3 are prove-
+nance queries (locateτ, invalidateI(z)); lines 4–5 are the
+O(1)checkpoint restore (Lemma 1); lines 6–10 re-enact the
+counterfactual suffix (the construction of Theorem 1); total
+recomputationT−τ+ 1attains the bound of Corollary 1.
+Experiments
+Implementation and Setup
+Runtimeharness.Weimplementthistransitionsystemon
+HuggingFace Transformers with explicit KV management.
+AKVEngineexposesthethreeprimitivesthetheoryneeds:
+prefill,generate, andcrop. Every block, turn, tool
+call, observation, and summary is aRuntimeBlockcar-
+rying the provenance tuple above; oracle source-ID prop-
+agation (a turn generated while the target is resident in-
+herits its source ID) populates theArtifactGraph,
+whose taint queries implement lines 1–3 of Algorithm 1. A
+CheckpointStorekeeps metadata-only handles at ses-
+sion start, turn boundaries, and before the target;Restore
+is acropcall, granularity ablated below.
+Episodes.Eachepisodeisathree-phaseturnscript—setup
+(clean prefix),acquisition(the target enters via memory in-
+jectionortoolobservation),contamination(≥1modelturns
+folding the target into an answer and, per suite, asummary
+and/orpendingtoolplan)—re-runwiththetargetexcludedto
+producethecounterfactualreference.Episodesareconverted
+fromLongMemEval(Wu et al. 2025) (n=100, memory-
+injected facts),ToolSandbox(Lu et al. 2024) (n=100, tool-
+observed identifiers), andAgentDojo(Debenedetti et al.
+2024)(n=80;slack/workspace/banking/travel,20each);the
+tool-observation channel instantiates the detector-triggered
+case above: the target arrives inside a tool result the user
+never sees, and the forget request names the flagged obser-
+vation. Future queries are task-shaped and solicit the target
+(e.g., “schedule an appointmentnear my home”).
+Methods.Allmethodsbranchfromthesamecontaminated
+basestate(cachecloned),socomparisonsarepaired:B0No-
+Forget;B1Memory-Delete (remove the persistent record,
+session untouched—what deployed stacks do);B2Forget-
+Instruction (append “forgetz”);B3Source-Redaction (drop
+the source block, keep derived artifacts);B4Sanitize-no-
+Replay (drop source + descendants, regenerate nothing);
+B5Full-Reset (the counterfactual referenceR−z
+T );B5 ′ Full-
+Reset+prefixcache(controlisolatinghowmuchofB7’ssav-
+ing a generic cache recovers);B6Sanitized-Rebuild (string-
+redact the transcript, rebuild);B7 Selective-Replay(Algo-
+rithm1);B8FIDES-styleIFC(Costaetal.2025)(sinkpolicy
+overidentifier-typetoolarguments,nostatecleanup)andB9
+IFC + replay.
+Models and decoding.Primary model: Llama-3.1-
+8B-Instruct on one RTX 4090; cross-family replica-
+tion on Qwen2.5-7B-Instruct and Mistral-7B-Instruct-v0.3
+(Grattafiori et al. 2024; Yang et al. 2024; Jiang et al. 2023).
+Main tables use temperature 0; stochastic audits usek=5
+samplesatsamplingtemperature0.7undermatchedorinde-
+pendent seeds as noted (Tdenotes session length through-
+out).
+Metrics and audits.Leakageis scored over the final an-
+swer, tool arguments, and memory write-backs:exact(nor-
+malized string variants),action(target in a tool argument,
+by sink class: routing / selection / free-text), andany.CAD
+(counterfactual action distance) scores over-deletion: tool-
+choice mismatch plus argument distance vs. the B5 refer-
+ence.Utilitychecks preserved non-target facts;efficiency
+reports reused vs. recomputed tokens and latency. Since
+single-probe string matching is a lower bound, we add three
+audits, each disciplined by a measured false-positive floor
+(every probe also runs against B5; probes with nonzero
+floors are dropped—this excluded an LLM judge, floor
+0.34):Leak@probes(six probes: task, direct, think, intro-
+spect, enumerate, cued-completion),Leak@5(5 stochastic
+samples), and abehavioral-extractionsuite (below). Sig-
+nificance is paired throughout: exact McNemar (binary),
+Wilcoxon signed-rank (continuous).
+
+--- PAGE 6 ---
+Any-leak↓CAD↓Recomp↓
+Method LME TS AD (avg) (avg tok)
+B0 No-Forget 0.86 1.00 0.97 0.37 36
+B1 Memory-Delete 0.86 1.00 0.97 0.37 36
+B2 Forget-Instruction 0.38 0.72 0.00† 0.39 55
+B3 Source-Redaction 0.84 0.94 0.39 0.33 200
+B4 Sanitize-no-Replay 0.00 0.00 0.00 0.22 36
+B6 Sanitized-Rebuild 0.00 0.00 0.00 0.39 220
+B5 Full-Reset (ref) 0.00 0.00 0.00 0.00 1235
+B5′ +PrefixCache 0.00 0.00 0.00 0.00 202
+B7 Selective-Replay 0.00 0.00 0.00 0.00 133
+Table 1: Headline results (temperature 0; LMEn=100, TS
+n=100,ADn=80;CAD/Recompaveragedoversuites).Ses-
+sions run 12 turns past the target, half of them independent
+of it (indep= 0.5); Recomp counts tokens a method must
+recompute.†AD’staskqueryneversolicitsthetarget;cf.B2
+= 1.00in Table 2.
+Leak@probes↓Leak@5↓
+Method AD LME TS TS
+B0 No-Forget 1.00 1.00 1.00 1.00
+B2 Forget-Instruction 1.00 1.00 1.00 0.70
+B3 Source-Redaction 0.73 0.80 0.97 1.00
+B6 Sanitized-Rebuild – – – 0.00
+B8 FIDES-style IFC – – – 1.00
+B5 Full-Reset (floor) 0.00 0.00 0.00 0.00
+B7 Selective-Replay 0.00 0.00 0.00 0.00
+Table 2: Adversarial audits (n=30/suite). Leak@probes:
+leaked underanyof six probes against the same post-
+unlearning state; Leak@5: any of 5 samples at temperature
+0.7(ToolSandbox). B5=measured false-positive floor.
+Deletion is Not Forgetting
+Table1makesthenegativeclaimprecise.B1equalsB0inev-
+erycell:deletingthepersistentrecordchangesnothing—the
+target survives in answer, summary, plan, and cache (p=1.0
+vs. B0).B2suppresses leakage but leaves the value resident
+(Elicitation, below).B3leaks through derived artifacts: the
+model’ssummaryandplanre-emitthetarget(0.84/0.94any-
+leak). On ToolSandbox, 98% of B0/B1 leaks flow through
+routingarguments, steering side effects.B4achieves string-
+clean state by amputation but removes artifacts present in
+thecounterfactual(CAD0.22):over-deletion,notforgetting.
+B8(IFC only) blocks identifier sinks yet leaks at the B0 rate
+through free text (0.92–1.00); adding replay (B9) drops it to
+zero (p<0.001): state cleanup and flow control are orthogo-
+nal.B7matches B5 exactly (any-leak 0, CAD 0, agreement
+1.0) while recomputing9.3×fewer tokens than a full re-
+set (133 vs. 1235;p<10−3) and1.5×fewer than B5′, the
+prefix-cached control that recovers the same prefill saving
+but re-decodes the whole suffix—that residual gap is what
+provenance buys, and it scales withindep.
+Elicitation and Stochastic Audits
+Table 2 shows why single probes mislead.B2’s
+Leak@probes is 1.00 on all three suites: an introspection
+probe(“whatwereyoutoldtoforget?”)alonere-licensesthe
+Method avoid residuepsays it
+B0 No-Forget 1.00+0.68< .0010.00
+B1 Memory-Delete 1.00+0.68< .0010.00
+B2 Forget-Instruction 1.00+0.68< .0010.00
+B3 Source-Redaction 0.80+0.48< .0010.00
+B6 Sanitized-Rebuild 1.00+0.68< .0010.00
+B5 Full-Reset (ref) 0.32 — — 0.00
+B7 Selective-Replay 0.32+0.001.0 0.00
+Table 3: Behavioral extraction (30 preference episodes×2
+counterbalanced orders). The agent picks between two near-
+equivalent providers, one excluded by arevokedpreference;
+“avoid”=rateofpickingtheother,“saysit”=stringleakage
+of the revoked reason. The zero point ismeasured(B5=
+0.32), not assumed.
+value at 0.87–1.00, and enumeration and chain-of-thought
+probes surface it where a direct question does not: the in-
+struction leaves the value in state and commands silence.
+B3’s paraphrased derivations yield 0.73–0.97; B7 sits at the
+B5 floor: zero under every probe, including cued comple-
+tion, and zero on Leak@5. The audit also resolves Table 1’s
+AgentDojo anomaly: B2’s task-probe 0.00 reflects a query
+that never solicits the target, not the method; safety claims
+must rest on Leak@probes.
+Behavioral Extraction: Influence Without Strings
+Every other leakage number here is a string match, so a
+method that stopssayingthe target scores 0.00 whether or
+not it still shapes what the agentdoes; Table 3 separates the
+two via a revokedpreference(an exclusion) the agent need
+never state to act on.B0, B1, B2 and B6 all score 0.00 on
+string leakage yet act on the revoked preference in 100%
+of episodes(residue+0.68,p<0.001); B7 and B5 ′ match
+thereference(+0.00).Avarianthandingtheredactionbase-
+lines an oracle (the excluded brand added to the forbidden
+list)isinstructive:B6,whichredactseveryartifactincluding
+the model-authored summary, drops to the floor (0.35, n.s.);
+B3, which keeps derived artifacts, stays at 0.80. The hon-
+est reading: string redaction worksonly ifit reaches every
+derived artifactandthe exact string is known in advance;
+a preference has neither property—the model paraphrases it
+into its own notes. Replay needs no such assumption.
+Exactness, Efficiency, and Generality
+Exactness(Definition1).Undermatchedseedsattemper-
+ature0.7, B7 reproduces the B5 referencetoken-for-tokenin
+450/450 draws (ε=0); B6 manages 1%. Under independent
+seeds—the meaningful distributional test—no divergence
+from the B5 self-sampling floor is detectable for B7 on any
+ofthefourdistances(toolconsistency,toolTV,n-gram,em-
+bedding; Wilcoxonp >0.5throughout), whereas the same
+test flags B6 (tool TVp<10−3; Figure 3). Non-significance
+is not proof of equivalence; B6 is the positive control show-
+ing the test has power here, and formal equivalence testing
+(TOST against a pre-registered margin) is future work.
+TheT−τ+ 1law (Corollary 1).Sweeping the injec-
+tion stepτfrom the first turn to the last, B5’s recomputation
+
+--- PAGE 7 ---
+Figure 3: Behavioral distribution under stochastic decoding
+(pooledn≈90;k=5samplesattemperature0.7,independent
+seeds; dashed=B5 self-sampling floor). Stars: Wilcoxon
+vs. floor (∗∗p<.01, ∗∗∗p<.001). No B7 panel diverges de-
+tectably; B6’s stars show the test has power.
+stays flat while B7’s descends linearly inτ(R2=1.000on
+all three suites; LongMemEval: 1218→162 tokens vs. B5’s
+constant 1330)—tracking the post-target suffix length, not
+the session length. The second axis isindep, the fraction of
+post-targetworkcausallyindependentofz—whatmovesB7
+and B5′ apart. Real sessions carry such work in bulk: a skill
+card or document loaded and never used, a routine tool poll,
+an unrelated sub-task. Those turns are byte-identical coun-
+terfactually, so B7 re-prefillsthem (parallel) and re-decodes
+only the target-dependent remainder, while B5′ recovers the
+sameprefillsavingbutre-decodesthewholesuffix.B7’sde-
+codecostthereforefallslinearlywithindep(R 2=1.00)while
+B5′ staysflatat545–610tokens;atfullindependenceB7de-
+codes 114–147 tokens, 2.9–3.7 vs. 11.5–12.7s p50 (prefix
+cachingalone:1.01×).Atindep= 0theycoincideexactly—
+the honest degenerate case—with any-leak and CAD at the
+B5 floor throughout. This saving relies on an attribution
+oracle stronger than Lemma 2(ii)’s conservative model; it
+reducestokencostwithintransitions,nottheirnumber,leav-
+ing Corollary 1 intact. B7 further provides cache-residency
+independence, snapshot restoration, and a certifiable audit
+trail.
+Cross-model.The two load-bearing findings—B3 still
+leaks, B7 reaches the clean reference cheaply—reproduce
+on both other families (280 paired episodes each; B3 any-
+leak 0.84–1.00, B7 all-zeros, 2.9–4.3×savings). The one
+anomalous cell in the matrix (Llama’s B3=0.39 on Agent-
+Dojo) is model-specific (B3≥0.92 elsewhere)—a reason
+single-model unlearning evaluations mislead.
+Ablations
+Invalidation boundary (Lemma 2 is not pessimism).
+Could one keep the suffix KV and excise just the target’s
+span? Table 4 says no: span-only excision still leaks in up to
+93% of episodes—the surrounding KV wascomputed while
+attendingtothetarget—anditsCAD(0.47)isworsethanno
+forgetting at all(0.38), since deleting mid-context positions
+corrupts state the model misreads. Each escalation fixes one
+Any-leak↓CAD↓
+Invalidation reach AD LME TS (avg)
+None (B0) 0.97 0.83 1.00 0.38
+Target span only 0.13 0.63 0.93 0.47
+Span + descendants (B4) 0.00 0.00 0.00 0.23
++ replay (B7)0.00 0.00 0.00 0.00
+Full reset (B5) 0.00 0.00 0.00 0.00
+Table4:Invalidation-boundaryablation(n=30/suite).Span-
+onlyexcisionisunsafeanddamagesutility(CADworsethan
+no forgetting); safety needs the descendant closure, equiva-
+lence additionally needs replay.
+failuremode:thedescendantclosure(B4)zeroesleakagebut
+leavestheruntimemissingartifactsthecounterfactualwould
+have (CAD 0.23); only replay reaches equivalence. This is
+the empirical face of Lemma 2, and the depth sweep gives
+thematchingnecessityargumentforprovenance:B3isclean
+at derivation depth 0 (any-leak 0.00) and degrades to 0.33–
+0.97asananswer,plan,andsummarystackontop;B7holds
+any-leak=CAD=0 at every depth.
+Checkpoint granularity (an efficiency knob, not a
+correctness one).Sweeping checkpoint policies from
+every_turntosession_start(one checkpoint, no
+reusable pre-target prefix) leaves any-leak and CAD flat at
+zero: by Theorem 1, replay from an earlier clean bound-
+ary is equally exact, merely longer. Granularity buys only
+prefill reuse (∼1000 tokens, 0.1–0.15s) at negligible meta-
+data cost (≤4.4KB); B7 keeps its latency advantage even
+atsession_start(7.8 vs. 12.2s), since it comes from
+provenance-guided re-prefilling, which needs the artifact
+graph, not the checkpoint.
+Targetposition(leakageisposition-invariant;costisnot).
+Movingtheinjectionearly/middle/lateleaveseverymethod’s
+leakageandCADessentiallyunchanged—thetargetcontam-
+inatesthesessionwhereveritsits—whileB7’scostratiotoa
+full reset falls from 0.91 to 0.14: theT/(T−τ+ 1)profile
+of Corollary 1.
+Conclusion
+Statefulagentsbroketheequationbetweendeletingarecord
+andforgettingit:onceread,informationpropagatesintosum-
+maries,plans,andcachedtensorsthatforgetoperationsnever
+touch. Defining forgetting as counterfactual equivalence—
+exactlyachievable at the runtime layer, where splicing the
+cleanprefixtoareplayedsuffixcostsT−τ+1transitionsand
+no exact operator does better—we built Provenance-Guided
+Selective Replay, a cross-layer contract matching a full reset
+under every audit at a fraction of its cost.
+Limitations.Theguaranteecoversreconstructibleruntime
+state,notmodelparameters(Liuetal.2025),committedside
+effects (A3), or correlates ofz; recomputation cannot drop
+belowT−τ+1.Assumption(A2)fixespost-τobservations,
+so replay covers snapshot-replayable tool returns and mem-
+ory injections but not human turns that would have differed.
+Audits are string-based apart from the behavioral suite, and
+thedistributionalresultisnon-significance,notequivalence.
+
+--- PAGE 8 ---
+References
+Beurer-Kellner, L.; Buesser, B.; Creţu, A.-M.; Debenedetti,
+E.;Dobos,D.;Fabian,D.;Fischer,M.;Froelicher,D.;Grosse,
+K.;Naeff,D.;Ozoani,E.;Paverd,A.;Tramèr,F.;andVolhejn,
+V. 2025. Design Patterns for Securing LLM Agents against
+Prompt Injections.arXiv preprint arXiv:2506.08837.
+Bourtoule, L.; Chandrasekaran, V.; Choquette-Choo, C. A.;
+Jia, H.; Travers, A.; Zhang, B.; Lie, D.; and Papernot, N.
+2021. MachineUnlearning. InIEEESymposiumonSecurity
+and Privacy (S&P).
+Cao,Y.;andYang,J.2015. TowardsMakingSystemsForget
+with Machine Unlearning. InIEEE Symposium on Security
+and Privacy (S&P).
+Chhikara, P.; Khant, D.; Aryan, S.; Singh, T.; and Yadav,
+D. 2025. Mem0: Building Production-Ready AI Agents
+with Scalable Long-Term Memory. InarXiv preprint
+arXiv:2504.19413.
+Costa,M.;Köpf,B.;Kolluri,A.;Paverd,A.;Russinovich,M.;
+Salem,A.;Tople,S.;Wutschitz,L.;andZanella-Béguelin,S.
+2025. Securing AI Agents with Information-Flow Control.
+arXiv preprint arXiv:2505.23643.
+Debenedetti, E.; Shumailov, I.; Fan, T.; Hayes, J.; Carlini,
+N.; Fabian, D.; Kern, C.; Shi, C.; Terzis, A.; and Tramèr, F.
+2025. DefeatingPromptInjectionsbyDesign.arXivpreprint
+arXiv:2503.18813.
+Debenedetti, E.; Zhang, J.; Balunović, M.; Beurer-Kellner,
+L.;Fischer,M.;andTramèr,F.2024.AgentDojo:ADynamic
+Environment to Evaluate Prompt Injection Attacks and De-
+fenses for LLM Agents. InAdvances in Neural Information
+ProcessingSystems37(NeurIPS),DatasetsandBenchmarks
+Track.
+Eldan, R.; and Russinovich, M. 2023. Who’s Harry Pot-
+ter? Approximate Unlearning in LLMs.arXiv preprint
+arXiv:2310.02238.
+European Parliament and Council of the European Union.
+2016. Regulation (EU) 2016/679: General Data Protection
+Regulation,Article17(RighttoErasure). OfficialJournalof
+the European Union.
+Gim,I.;Chen,G.;Lee,S.-s.;Sarda,N.;Khandelwal,A.;and
+Zhong,L.2024. PromptCache:ModularAttentionReusefor
+Low-Latency Inference. InProceedings of Machine Learn-
+ing and Systems (MLSys).
+Grattafiori, A.; et al. 2024. The Llama 3 Herd of Models.
+arXiv preprint arXiv:2407.21783.
+Greshake,K.;Abdelnabi,S.;Mishra,S.;Endres,C.;Holz,T.;
+and Fritz, M. 2023. Not What You’ve Signed Up For: Com-
+promisingReal-WorldLLM-IntegratedApplicationswithIn-
+direct Prompt Injection. InProceedings of the 16th ACM
+Workshop on Artificial Intelligence and Security (AISec).
+Jia, Y.; Liu, Y.; Shao, Z.; Jia, J.; and Gong, N. Z. 2026.
+PromptLocate:LocalizingPromptInjectionAttacks.InIEEE
+Symposium on Security and Privacy (S&P).
+Jiang, A. Q.; Sablayrolles, A.; Mensch, A.; Bamford, C.;
+Chaplot, D. S.; de las Casas, D.; Bressand, F.; Lengyel, G.;
+Lample, G.; Saulnier, L.; et al. 2023. Mistral 7B.arXiv
+preprint arXiv:2310.06825.
+Kwon,W.;Li,Z.;Zhuang,S.;Sheng,Y.;Zheng,L.;Yu,C.H.;
+Gonzalez, J. E.; Zhang, H.; and Stoica, I. 2023. Efficient
+Memory Management for Large Language Model Serving
+withPagedAttention. InProceedingsofthe29thSymposium
+on Operating Systems Principles (SOSP).
+Liu, S.; Yao, Y.; Jia, J.; Casper, S.; Baracaldo, N.; Hase, P.;
+Yao, Y.; Liu, C. Y.; Xu, X.; Li, H.; Varshney, K. R.; Bansal,
+M.; Koyejo, S.; and Liu, Y. 2025. Rethinking Machine Un-
+learningforLargeLanguageModels.NatureMachineIntel-
+ligence.
+Lu, J.; Holleis, T.; Zhang, Y.; Aumayer, B.; Nan, F.; Bai,
+F.; Ma, S.; Ma, S.; Li, M.; Yin, G.; Wang, Z.; and Pang, R.
+2024. ToolSandbox: A Stateful, Conversational, Interactive
+EvaluationBenchmarkforLLMToolUseCapabilities.arXiv
+preprint arXiv:2408.04682.
+Maini, P.; Feng, Z.; Schwarzschild, A.; Lipton, Z. C.; and
+Kolter, J. Z. 2024. TOFU: A Task of Fictitious Unlearning
+for LLMs. InConference on Language Modeling (COLM).
+Nous Research. 2026. Hermes Agent: A Self-Hosted,
+Long-Running Autonomous Agent. https://github.com/
+NousResearch/hermes-agent. Accessed July 2026.
+Packer,C.;Wooders,S.;Lin,K.;Fang,V.;Patil,S.G.;Stoica,
+I.; and Gonzalez, J. E. 2023. MemGPT: Towards LLMs as
+Operating Systems. InarXiv preprint arXiv:2310.08560.
+Steinberger, P. 2026. OpenClaw: An Open-Source Personal
+AIAgent. https://github.com/openclaw/openclaw. Accessed
+July 2026.
+Wallace, E.; Xiao, K.; Leike, R.; Weng, L.; Heidecke, J.;
+and Beutel, A. 2024. The Instruction Hierarchy: Training
+LLMs to Prioritize Privileged Instructions.arXiv preprint
+arXiv:2404.13208.
+Wu,D.;Wang,H.;Yu,W.;Zhang,Y.;Chang,K.-W.;andYu,
+D. 2025. LongMemEval: Benchmarking Chat Assistants on
+Long-TermInteractiveMemory.InInternationalConference
+on Learning Representations (ICLR).
+Yang, A.; et al. 2024. Qwen2.5 Technical Report.arXiv
+preprint arXiv:2412.15115.
+Zheng, L.; Yin, L.; Xie, Z.; Sun, C.; Huang, J.; Yu, C. H.;
+Cao,S.;Kozyrakis,C.;Stoica,I.;Gonzalez,J.E.;Barrett,C.;
+and Sheng, Y. 2024. SGLang: Efficient Execution of Struc-
+tured Language Model Programs. InAdvances in Neural
+Information Processing Systems 37 (NeurIPS).

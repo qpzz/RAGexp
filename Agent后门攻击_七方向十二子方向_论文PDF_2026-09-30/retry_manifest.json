@@ -1,0 +1,73 @@
+[
+  {
+    "number": 1,
+    "name": "TrojDRL",
+    "citation": "Kiourti P, Wardega K, Jha S, Li W. TrojDRL: Evaluation of Backdoor Attacks on Deep Reinforcement Learning. DAC, 2020；预印本标题 TrojDRL: Trojan Attacks on Deep Reinforcement Learning Agents，2019。https://open.bu.edu/items/3d852534-ec2f-4dc7-ae87-4a65c373de6e ；https://arxiv.org/abs/1903.06638",
+    "source_urls": [
+      "https://open.bu.edu/items/3d852534-ec2f-4dc7-ae87-4a65c373de6e",
+      "https://arxiv.org/abs/1903.06638"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/1903.06638"
+    ],
+    "status": "downloaded",
+    "file": "01_TrojDRL.pdf",
+    "download_url": "https://arxiv.org/pdf/1903.06638",
+    "bytes": 4998967,
+    "sha256": "d55e302dc47237e04ac4e5fb584abc4598007bcbbd02cdd935e7a3d480caa5d7"
+  },
+  {
+    "number": 8,
+    "name": "SleeperNets",
+    "citation": "Rathbun E, Amato C, Oprea A. SleeperNets: Universal Backdoor Poisoning Attacks Against Reinforcement Learning Agents. NeurIPS, 2024。https://proceedings.neurips.cc/paper_files/paper/2024/hash/cb03b5108f1c3a38c990ef0b45bc8b31-Abstract-Conference.html",
+    "source_urls": [
+      "https://proceedings.neurips.cc/paper_files/paper/2024/hash/cb03b5108f1c3a38c990ef0b45bc8b31-Abstract-Conference.html"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2405.20539"
+    ],
+    "status": "failed",
+    "file": "08_SleeperNets.pdf",
+    "errors": [
+      {
+        "url": "https://arxiv.org/pdf/2405.20539",
+        "error": "curl: (28) Operation timed out after 90012 milliseconds with 3635905 out of 7369186 bytes received"
+      }
+    ]
+  },
+  {
+    "number": 9,
+    "name": "Adversarial-Inception",
+    "citation": "Rathbun E, Oprea A, Amato C. Adversarial Inception Backdoor Attacks against Reinforcement Learning. ICML, 2025。https://proceedings.mlr.press/v267/rathbun25a.html",
+    "source_urls": [
+      "https://proceedings.mlr.press/v267/rathbun25a.html"
+    ],
+    "candidate_pdf_urls": [
+      "https://raw.githubusercontent.com/mlresearch/v267/main/assets/rathbun25a/rathbun25a.pdf"
+    ],
+    "status": "downloaded",
+    "file": "09_Adversarial-Inception.pdf",
+    "download_url": "https://raw.githubusercontent.com/mlresearch/v267/main/assets/rathbun25a/rathbun25a.pdf",
+    "bytes": 3522065,
+    "sha256": "725dd3e8a070a9e24d236b8b66e68872d5492fd6717675a3b4e5b2bfdd41e185"
+  },
+  {
+    "number": 10,
+    "name": "Indirect-Prompt-Injection",
+    "citation": "Greshake K, et al. Not What You've Signed Up For: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection. 2023，本报告使用预印本入口。https://arxiv.org/abs/2302.12173",
+    "source_urls": [
+      "https://arxiv.org/abs/2302.12173"
+    ],
+    "candidate_pdf_urls": [
+      "https://arxiv.org/pdf/2302.12173"
+    ],
+    "status": "failed",
+    "file": "10_Indirect-Prompt-Injection.pdf",
+    "errors": [
+      {
+        "url": "https://arxiv.org/pdf/2302.12173",
+        "error": "curl: (28) Operation timed out after 90007 milliseconds with 3931535 out of 7306999 bytes received"
+      }
+    ]
+  }
+]
