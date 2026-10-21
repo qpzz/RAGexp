@@ -1,0 +1,1638 @@
+
+
+========== PDF PAGE 1 / 17 ==========
+Proceedings of the 19th Conference of the European Chapter of the Association for Computational Linguistics
+Volume 1: Long Papers, pages 8359–8375
+March 24-29, 2026 ©2026 Association for Computational Linguistics
+Redefining Retrieval Evaluation in the Era of LLMs
+Giovanni Trappolini1,3*†, Florin Cuconasu1,2∗‡§
+Simone Filice2, Yoelle Maarek2, Fabrizio Silvestri1
+1Sapienza University of Rome, 2Technology Innovation Institute, 3Universitas Mercatorum
+Abstract
+Traditional Information Retrieval (IR) met-
+rics, such as nDCG, MAP, and MRR, assume
+that human users sequentially examine doc-
+uments with diminishing attention to lower
+ranks. This assumption breaks down in Re-
+trieval Augmented Generation (RAG) systems,
+where search results are consumed by Large
+Language Models (LLMs), which, unlike hu-
+mans, process all retrieved documents as a
+whole rather than sequentially. Additionally,
+traditional IR metrics do not account for related
+but irrelevant documents that actively degrade
+generation quality, rather than merely being ig-
+nored. Due to these two major misalignments,
+namely human vs. machine position discount
+and human relevance vs. machine utility, clas-
+sical IR metrics do not accurately predict RAG
+performance. We introduce a utility-based an-
+notation schema that quantifies both the posi-
+tive contribution of relevant passages and the
+negative impact of distracting ones. Building
+on this foundation, we propose UDCG (Util-
+ity and Distraction-aware Cumulative Gain), a
+metric using an LLM-oriented positional dis-
+count to directly optimize the correlation with
+the end-to-end answer accuracy. Experiments
+on five datasets and six LLMs demonstrate that
+UDCG improves correlation by up to 36% com-
+pared to traditional metrics. Our work provides
+a critical step toward aligning IR evaluation
+with LLM consumers and enables more reli-
+able assessment of RAG components1.
+1 Introduction
+The emergence of Retrieval Augmented Genera-
+tion (RAG) systems has fundamentally transformed
+how we approach knowledge-intensive natural lan-
+guage processing tasks (Gao et al., 2024). By
+*These authors contributed equally to this work.
+†trappolini@diag.uniroma1.it
+‡Work conducted while FC being a research intern at TII.
+§cuconasu@diag.uniroma1.it
+1Code and data at https://github.com/GiovanniTRA/UDCG
+combining the parametric knowledge of Large
+Language Models (LLMs) with the dynamic re-
+trieval of relevant information from external cor-
+pora, RAG systems have demonstrated remarkable
+capabilities across diverse applications, including
+question answering (Lewis et al., 2020; Izacard
+and Grave, 2021) and fact-checking (Khaliq et al.,
+2024) and beyond. However, as these systems have
+gained prominence, a critical gap has emerged be-
+tween the evaluation methodologies inherited from
+traditional information retrieval (IR) and the unique
+characteristics of LLM-based retrieval consumers.
+Traditional offline IR evaluation metrics, in-
+cluding Normalized Discounted Cumulative Gain
+(nDCG) (Järvelin and Kekäläinen, 2002), Mean
+Average Precision (MAP), and Mean Reciprocal
+Rank (MRR), were developed with human users in
+mind (Manning et al., 2008). In other words, they
+assume that the ultimate judge of the quality of the
+results is a human. These assumptions cause two
+major limitations in the generative AI and agentic
+AI eras, when LLMs or more generallymachines
+consume the search results.
+Human vs. Machine Position Discount.Hu-
+mans sequentially examine retrieved documents;
+therefore, human-centric IR metrics assign mono-
+tonically decreasing weights to lower-ranked doc-
+uments, reflecting the intuitive notion that doc-
+uments appearing further down the list are less
+likely to be examined and therefore less valuable to
+the user. Conversely, in the case of RAG systems,
+LLMs process all retrieved documents as a whole
+within their input context. Recent research has
+revealed that LLMs exhibit systematic positional
+biases when processing prompts that include multi-
+ple documents (Liu et al., 2024; Hutter et al., 2025).
+These biases can manifest in various patterns de-
+pending on the model and context, potentially caus-
+ing LLMs to attend differently to information based
+on its position in the prompt. This suggests that
+the monotonic position-based discount embedded
+8359
+
+========== PDF PAGE 2 / 17 ==========
+in classical IR metrics may not accurately reflect
+how LLMs leverage retrieved content, and how it
+should be valued.
+Human Relevance vs. Machine Utility.A second
+limitation is that traditional IR metrics operate un-
+der a simplistic binary (relevant vs. irrelevant) or
+ordinal (e.g., 0-5 relevance scale) relevance frame-
+work, treating all non-relevant documents as equiv-
+alent. This assumption fails to capture two crucial
+aspects of the RAG setting: (i) LLMs might fail to
+use relevant passages (e.g., because they are con-
+voluted); and (ii) irrelevant documents not only do
+not contribute value, they actually have a negative
+impact as they act as distractors that can mislead
+the LLM and degrade the system performance (Cu-
+conasu et al., 2024; Jin et al., 2025). The heteroge-
+neous nature of these distracting effects means that
+different irrelevant documents can have vastly dif-
+ferent impacts on the quality of the final generation
+(Amiraz et al., 2025). Yet, current metrics provide
+no mechanism to distinguish between them.
+These two limitations of existing IR relevance
+metrics extend beyond theoretical concerns. They
+have practical implications for RAG system devel-
+opment and deployment, since IR components are
+optimized using these metrics, which may actually
+harm end-to-end system performance. We argue
+here that RAG systems face today a fundamental
+challenge:how can they be reliably evaluated and
+improved, when their retrieval component is opti-
+mized for metrics designed for an entirely differ-
+ent use case?This paper addresses this challenge
+through both empirical analysis and methodologi-
+cal innovation.
+We begin by providing concrete demonstrations
+of how traditional IR metrics fail to predict RAG
+performance, using constructed examples that high-
+light the disconnect between metric scores and
+actual system effectiveness. To address this dis-
+connect, we propose a novel passage annotation
+strategy that fundamentally reconceptualizes rele-
+vance assessment for LLM consumers. Rather than
+relying on discrete relevance judgments designed
+for human interpretation, we introduce a continu-
+ous utility scoring framework that captures both
+the beneficial impact of relevant passages on LLM
+generation quality and the distracting effects of ir-
+relevant passages that can mislead the model. This
+dual consideration of utility and distraction enables
+a more nuanced understanding of how individual
+passages contribute to or detract from end-to-end
+system performance. We demonstrate the practical
+value of this annotation approach by showing that
+ranking retrieved passages according to our utility
+scores and selecting the top-kresults yields signifi-
+cantly better LLM accuracy compared to selection
+based on traditional relevance annotations. This
+finding provides empirical evidence that optimiz-
+ing for utility-aware rankings directly translates to
+improved RAG system performance.
+Building on these utility-based annotations, we
+introduce a novel evaluation metric specifically de-
+signed for RAG systems that we refer to as Utility
+and Distraction-aware Cumulative Gain (UDCG).
+UDCG leverages our continuous scoring frame-
+work to substitute human relevance with machine
+utility. Moreover, it applies an LLM-oriented po-
+sitional discount that directly optimizes the corre-
+lation between the IR metric and the end-to-end
+answer accuracy. Through comprehensive experi-
+ments across six different LLMs and five diverse
+benchmarks, we demonstrate that UDCG exhibits
+substantially stronger correlation with end-to-end
+RAG accuracy than traditional IR metrics, with in-
+crements up to 36%. These results establish UDCG
+as a more reliable indicator of retrieval component
+quality for RAG systems, enabling practitioners to
+optimize their systems toward metrics that actually
+predict downstream performance.
+2 Related Work
+2.1 Retrieval Augmented Generation
+Recently, RAG has emerged as a new application
+of IR systems: LLMs by accessing information
+retrieved with IR systems can incorporate exter-
+nal knowledge into their outputs, improving the
+response quality (Lewis et al., 2020; Gao et al.,
+2024; Fan et al., 2024). This approach addresses
+critical limitations of standalone language models,
+particularly their tendency toward hallucination and
+their inability to access information beyond their
+training cutoff dates. When operating in the RAG
+setting, LLMs have two major limitations related
+to their ability to capitalize on the input context.
+First, the effect of irrelevant documents, defined
+in Cuconasu et al. (2024) as documents not con-
+taining the answer to the question. Humans are not
+really confused by their presence in the result list
+since they can quickly skim and dismiss them. On
+the contrary, for LLMs in RAG systems, irrelevant
+documents pose a more serious problem: they act
+as noise that can dilute attention, trigger hallucina-
+tions, or cause the model to synthesize incorrect
+8360
+
+========== PDF PAGE 3 / 17 ==========
+information by attempting to find connections be-
+tween the query and unrelated content. Cuconasu
+et al. (2024) show that while random passages un-
+related to the question do not affect answer quality,
+distracting passages, i.e., passages semantically re-
+lated to the query but not containing the answer,
+do. Attempts to improve the LLM’s robustness
+mitigate but do not fully solve the LLM’s suscep-
+tibility to irrelevant content (Amiraz et al., 2025;
+Jin et al., 2025; Lin et al., 2024; Yoran et al., 2024;
+Yu et al., 2024; D’Erasmo et al., 2025). Amiraz
+et al. (2025) expand this line of research and pro-
+pose a continuous score to measure the distracting
+effect of irrelevant passages. Formally, they com-
+pute the distracting effect DEq(p) of an irrelevant
+passage pfor question qas the probability of the
+LLM not abstaining when receiving only passage
+pand questionqin its prompt:
+DEq(p) = 1−pLLM(NO-RESPONSE|q,p)(1)
+In our paper, we will include this formulation as a
+core component of our proposed metric for evalu-
+ating IR systems serving the RAG scenario2.
+A second limitation of the LLM’s reading pro-
+cess is the positional bias: the capability of identi-
+fying relevant content depends on its location in the
+prompt. In particular, Liu et al. (2024) discovered
+the lost-in-the-middle effect, where the LLMs tend
+to ignore information in the middle of the prompt,
+and Hutter et al. (2025) demonstrate that different
+LLMs exhibit distinct positional bias patterns. Cu-
+conasu et al. (2025) extend this work by showing
+how the positional bias also affects the impact of
+distracting documents.
+2.2 IR Evaluation for RAG
+Most works in the RAG literature evaluate the IR
+components jointly with the generation compo-
+nents, by assessing the quality of the RAG end-
+to-end response (Yu et al., 2025). This approach,
+in addition to obscuring the retrieval’s distinct con-
+tribution, is computationally demanding since it
+requires generating a response for each new tested
+context, including contexts that contain the same
+passages but in a different order.
+When focusing on specifically evaluating the
+retrieved content, most practitioners still rely on
+traditional IR metrics, including Precision (Prec),
+HITS, Mean Average Precision (MAP), Mean Re-
+ciprocal Rank (MRR), and normalized Discounted
+2In Appendix C, we also tested the log-likelihood of the
+correct answer as an estimator, obtaining worse results overall.
+Cumulative Gain (nDCG) 3. These metrics have
+been designed for human users, and have relevance
+as a central notion, which represents the degree to
+which a retrieved document satisfies a user’s infor-
+mation need. Also, they generally apply a discount
+function to reduce the contribution of documents at
+lower ranks, reflecting the realistic assumption that
+users are less likely to examine documents further
+down in the ranking.
+A few papers propose IR evaluation strategies
+directly designed for the RAG setting. Salemi and
+Zamani (2024) propose eRAG: they score each doc-
+ument based on the quality of the LLM’s response
+when receiving only that document as a context
+in a RAG setting; then they show that using these
+scores instead of standard relevance labeling inside
+traditional IR metrics (e.g., MAP, MRR, nDCG) im-
+proves their correlation with the end-to-end RAG
+performance. Dai et al. (2025) propose Semantic
+Perplexity, a metric that captures the LLM’s inter-
+nal belief about the correctness of the generated
+answer, by quantifying the variation of perplexity
+in the LLM response when answering with and
+without the retrieved content. The intuition is that
+useful content leads to increased confidence in the
+LLM answer.
+Similarly to these approaches, in this paper, we
+employ an LLM-oriented definition of relevance,
+which we integrate with the notion of distracting ef-
+fect into a holistic IR metric for the RAG scenario.
+3 Flaws of Traditional IR Metrics in RAG
+Traditional IR systems and evaluation metrics have
+been fundamentally designed with human users
+as the primary consumers of retrieved informa-
+tion, reflecting assumptions about human cogni-
+tive processes, information processing capabilities,
+and search behaviors. These metrics inherently
+assume that users will manually examine ranked
+result lists, with higher-ranked documents receiv-
+ing greater attention–a design philosophy rooted
+in human browsing patterns (Granka et al., 2004;
+Cutrell and Guan, 2007).
+When the consumers of IR results are LLMs in-
+stead of humans, many of these assumptions do not
+hold. First, the human-centric notion of document
+relevance does not necessarily align with the doc-
+ument utility in enabling an LLM to successfully
+execute its task (Tian et al., 2025).
+Moreover, there is a fundamental difference in
+3A detailed description of these metrics is in Appendix A.
+8361
+
+========== PDF PAGE 4 / 17 ==========
+Model Rel in WD Rel in HD∆(WD - HD)
+Llama 3B 81.11 75.56 5.55
+Llama 8B 89.44 82.22 7.22
+Llama 70B 90.32 83.50 6.82
+Gemma 4B 84.00 78.89 5.11
+Mistral 7B 88.33 82.00 6.33
+Qwen 7B 87.78 78.67 9.11
+Table 1: Answer accuracy of LLMs prompted with
+one relevant passage and four Weak Distractors (WD,
+DE<0.2) or Hard Distractors (HD, DE>0.8). All differ-
+ences are statistically significant (Wilcoxon, p < 0.05).
+how humans and LLMs handle irrelevant docu-
+ments, as LLMs lack the intuitive filtering mecha-
+nisms that allow humans to cleanly separate signal
+from noise. Jin et al. (2025) provide evidence of
+this by showing that irrelevant passages retrieved
+by high-performing retrieval systems are more dis-
+tracting, and therefore they cause more harm, than
+irrelevant passages retrieved by weaker retrieval
+systems. Consequently, we argue here that IR sys-
+tems that are trained and evaluated over traditional
+IR metrics are likely to optimize for the wrong ob-
+jective when the consumer of results is an LLM, a
+machine, rather than a human.
+Table 1 exemplifies this flaw by comparing the
+average answer accuracy on NQ4 of several LLMs
+when prompted with a single relevant passage sur-
+rounded by only weakly or only hardly distracting
+passages. All traditional IR metrics5 would score
+these two scenarios equally, although their end-
+to-end accuracy changes significantly, exhibiting
+differences of up to 9 accuracy points.
+Another aspect to consider when evaluating IR
+systems for the RAG scenario is that, unlike hu-
+mans who sequentially scan through retrieved doc-
+uments one by one until finding relevant informa-
+tion or abandoning their search, LLMs process the
+entire prompt holistically, consuming all retrieved
+documents as a whole. Furthermore, the LLMs’
+ability to leverage the input context is affected by
+the positional bias. This contradicts the human-
+centric reward schema characterizing traditional
+IR metrics such as MRR, nDCG, or MAP, where
+relevant documents provide a contribution that de-
+creases with their position in the ranking.
+Figure 1 illustrates this in a controlled exper-
+iment where a single relevant passage is moved
+in a context of irrelevant ones. Experiments use
+4Refer to Section 6 for details on LLMs, benchmarks, and
+answer evaluation.
+5Henceforth, we assume all metrics have a cutoff atk.
+1 2 3 4 5
+Relevant Passage Position
+79.0
+79.5
+80.0
+80.5
+81.0
+81.5
+82.0
+82.5LLM answer accuracy
+answer accuracy
+nDCG
+MAP and MRR
+Precision
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+1.0
+IR metrics
+Figure 1: Misalignment between traditional IR metrics
+(blue) and LLM answer accuracy (red) when a single
+relevant passage is shifted among irrelevant passages.
+Qwen 7B on 500 questions from PopQA, NQ, and
+TriviaQA. LLM accuracy exhibits the U-shaped
+lost-in-the-middle effect, while nDCG, MAP, and
+MRR decrease monotonically6; Precision, being
+position-unaware, remains constant.
+4 An LLM-oriented Annotation Schema
+Building on the discussion in the previous sec-
+tion, we propose a novel RAG-oriented annotation
+schema that replaces the human-centric notion of
+passage relevance with passage utility for an LLM.
+Similarly to how the distracting effect is computed,
+we assess the utility of a passage pfor a question q
+as the probability of the LLM not abstaining when
+receiving that passage. If the passage is relevant,
+i.e., if it contains the answer, we interpret this prob-
+ability as the likelihood that the LLM infers such
+an answer from the passage 7. When the passage
+is irrelevant, the non-abstention probability corre-
+sponds to the distracting effect (Eq. 1) formalized
+in Amiraz et al. (2025), and we interpret it as a
+negative utility. More formally, given a questionq
+and a passage p, the passage utility uis defined as:
+u(q, p) =R(q, p)
+(
+1−p LLM(NO-RESPONSE|q, p)
+)
+(2)
+Where R(q,p) is 1 if the passagepis relevant to the
+question q, -1 otherwise. Such a relevance label can
+be human-annotated or machine-generated using
+the LLM-as-a-judge approach.
+6With one relevant passage, MRR equals MAP.
+7We assume that relevant passages do not include distract-
+ing information. Therefore, when prompted with a lone rel-
+evant passage, the LLM either answers correctly or abstains,
+and never produces wrong answers. Although potentially pos-
+sible, we never observed this case in preliminary experiments.
+8362
+
+========== PDF PAGE 5 / 17 ==========
+Note that for a ranked list of kpassages, obtain-
+ing utility scores for the k individual passages is
+computationally cheaper than applying an end-to-
+end evaluation, i.e., running the LLM generator
+on the entire list and assessing the quality of its
+response. This is because the runtime cost of a
+vanilla transformer (Vaswani et al., 2017) scales
+quadratically with its input length. Consequently, if
+we assume that each passage has an average length
+of wtokens, and each answer consists on average
+of gtokens, generating the LLM answer using the
+full list would cost O(gk2w2); conversely, to ob-
+tain the utility of each passage 8, we would need
+to invoke k times the LLM with a shorter input
+and only generate the probability distribution of
+the first token, for a total cost ofO(kw 2).
+5 Defining a RAG-tailored Metric
+Given a question q, the kretrieved passages C=
+[p1,...,p k] and their utilities ui =u(q,p i) to an
+LLM, we formalizeUtility and Distraction-aware
+Cumulative Gain(UDCG), a metric to score how
+the entire context Cis expected to help the LLM to
+answer q. We propose two variants of this metric.
+The former is a learnable version (UDCG θ) that
+holistically accounts for the concepts of passage
+relevance, distracting effect, and LLM positional
+bias and is defined as follows:
+UDCGθ(q,C) =σ
+( k∑
+i=1
+αiu+
+i +
+k∑
+i=1
+βiu−
+i
+)
+(3)
+where u+ and u− are the positive and negative
+parts of u, respectively, and isolate the relevance
+and distracting effect of the passages; αi and βi are
+positional weights associated with the relevance
+and the distracting effect of the passages, respec-
+tively; finally σ(x) = 1
+1+e−x is the sigmoid func-
+tion, which is used to bound the range of the metric
+in [0, 1] and facilitates the average across multiple
+questions. In short, UDCGθ calculates a weighted
+sum of the relevance and the distracting effect of
+the passages, where the weights take into account
+the LLM positional bias. For contexts having k
+passages, the metric has 2k parameters, i.e., the
+α1,...α k and the β1,...β k, which can be learned
+using a linear model on feature vectors contain-
+ing [u+
+1 ,...u +
+k,u−
+1 ,...u −
+k] trained to predict the
+end-to-end answer accuracy.
+8We assume passage relevance annotations are provided
+(common in IR datasets). Otherwise, they can be computed via
+LLM-as-a-judge at a similar cost to the abstention probability.
+UDCGθ has two drawbacks: (i) it requires a
+training process to learn its 2k parameters; and
+(ii) it strictly depends on the number of retrieved
+passages k, which means that each value of kre-
+quires a dedicated training process. To facilitate the
+metric applicability, we propose its training-free
+version, named just UDCG for simplicity:
+UDCG(q,C) =σ
+(1
+k
+k∑
+i=1
+u+
+i + γ
+k
+k∑
+i=1
+u−
+i
+)
+(4)
+This version neglects the LLM’s positional bias
+and performs a linear combination of the average
+passage relevance and the average distracting effect.
+There is a single hyperparameter γ∈[0,1] that
+balances the contribution of these two terms. It can
+be tuned for each scenario, but in our experiments,
+we show that γ= 1/3 provides good results on
+multiple LLMs and datasets9.
+6 Experimental Setting
+6.1 Datasets and Models
+We run experiments using five question-answering
+datasets spanning general knowledge and special-
+ized domains. For general knowledge evaluation,
+we use PopQA (Mallen et al., 2023), the English
+subset of NoMIRACL (Thakur et al., 2024), and
+the KILT versions (Petroni et al., 2021) of Nat-
+ural Questions (NQ) (Kwiatkowski et al., 2019)
+and TriviaQA (Joshi et al., 2017). To evaluate per-
+formance in specialized domains, we additionally
+include the factoid subset of BioASQ (Tsatsaro-
+nis et al., 2015) for biomedical question answer-
+ing. For the Wikipedia-based datasets, we use the
+KILT corpus10; for BioASQ, we use PubMed 11.
+We index the corpora using BGE-large-en-v1.5
+embedding model (Chen et al., 2024a), with the
+only exception of NoMIRACL, which provides
+pre-retrieved passages with relevance annotations.
+As LLMs for answer generation, we use the
+instruction-tuned versions of Llama-3.2-3B (L-
+3B), Llama-3.1-8B (L-8B), Llama-3.3-70B (L-
+70B) (Grattafiori et al., 2024), Mistral-7B (M-7B)
+(Jiang et al., 2023), Gemma-3-4B (G-4B) (Team
+et al., 2025), and Qwen-2.5-7B (Q-7B) (Yang et al.,
+9We also experimented with neural network architectures
+to model inter-document relationships, but their performance
+was comparable to UDCGθ while requiring substantially more
+computational overhead.
+10https://huggingface.co/datasets/facebook/kilt_wikipedia
+11https://pubmed.ncbi.nlm.nih.gov/
+8363
+
+========== PDF PAGE 6 / 17 ==========
+2025), spanning different model sizes and fam-
+ilies12. We employ greedy decoding for repro-
+ducibility.
+6.2 Evaluation Strategy
+Following established practices in RAG evaluation
+(Zheng et al., 2023; Gu et al., 2025; Rahmani et al.,
+2024), we assess passage relevance and answer
+quality using the LLM-as-a-judge approach. For
+passage relevance annotation, we use Claude 3.7
+Sonnet via AWS Bedrock to classify each retrieved
+passage as relevant or irrelevant by providing both
+the query and the reference answer to the model
+(see Figure 5). We consider a passage relevant only
+if it contains the necessary information to answer
+the query. For NoMIRACL, we utilize the rele-
+vance annotations directly provided in the dataset.
+We then apply our utility-based scoring mechanism
+to quantify the effects of different passages on LLM
+effectiveness, as described in Section 4.
+For the quality evaluation of the responses, we
+follow previous work on the evaluation of high-
+fidelity RAG (Thakur et al., 2024; Chen et al.,
+2024b) and adopt the setting where LLMs are ex-
+plicitly asked to abstain when sufficient informa-
+tion is not present in the input context (see Figure
+4). In this framework a response is completely cor-
+rect only if the input context to the LLM contains
+at least a relevant passage and its response matches
+the reference answer, otherwise is just partially
+correct (see Figure 6); we evaluate the semantic
+equivalence of the answer with Gemini 2.0 Flash.
+This abstention requirement serves multiple pur-
+poses: it aligns with real-world deployment sce-
+narios where RAG systems must balance informa-
+tiveness with reliability, particularly in high-stakes
+domains (e.g., biomedicine) where incorrect re-
+sponses can be more harmful than acknowledged
+uncertainty (Sun et al., 2025); it ensures that re-
+sponses are only provided when supported by the
+retrieved content, thereby enhancing faithfulness
+and user transparency (Wallat et al., 2025); and it
+provides clearer attribution of effectiveness to the
+retrieval component by preventing LLMs from re-
+lying solely on their parametric knowledge when
+retrieved context is insufficient (Xu et al., 2024).
+12For brevity, we omit version numbers when referring to
+models (e.g., Qwen 7B refers to Qwen-2.5-7B).
+7 Experimental Results
+7.1 Ideal Rankings of Different Annotations
+To show the potential of our annotation schema, we
+sample 1000 questions from each dataset and re-
+trieve the top 25 passages using BGE-large-en-v1.5.
+Then we annotate them using (i) binary relevance
+labeling, (ii) the eRAG approach (Salemi and Za-
+mani, 2024), which assigns a utility score to each
+passage by computing the ROUGE-L (Lin, 2004)
+similarity between the reference answer and the
+answer generated by the LLM when prompted only
+with that passage, and (iii) our utility-based annota-
+tion schema according to Eq. 2. For each schema,
+we assume to have an oracle re-ranker that selects
+the best five passages based on their annotations13
+and prompt the LLM to generate the response based
+on such passages.
+For 87% of the queries across the five bench-
+marks, there is at least a relevant passage among
+the 25 we retrieved; by selecting passages based
+on the binary relevance labeling or based on our
+annotation schema, relevant passages are always
+ranked better than irrelevant ones; therefore, a per-
+fect LLM would provide 87% correct responses
+and abstain in the remaining 13% of the cases.
+Conversely, the passage selection according to the
+eRAG annotation schema sometimes favors irrele-
+vant passages over relevant ones, resulting in only
+71% to 77% of the contexts that include at least a
+relevant passage among the selected five, depend-
+ing on the LLM; this significantly lowers the upper-
+bound answer correctness achievable with eRAG.
+Binary Rel. eRAG Our Method
+Model C↑A W↓C↑A W↓C↑A W↓
+Llama 3B 71.6 13.4 15.0 60.5 23.0 16.572.919.08.2
+Llama 8B 73.5 15.9 10.6 64.4 23.6 12.075.120.04.9
+Llama 70B 78.4 12.1 9.5 65.9 23.7 10.380.216.73.0
+Gemma 4B 74.2 7.6 18.2 66.6 11.7 21.776.013.110.9
+Mistral 7B 76.2 10.5 13.3 62.7 20.8 16.476.916.56.6
+Qwen 7B 72.1 18.5 9.4 62.1 26.3 11.573.521.84.8
+Table 2: Percentage of correct (C) answers, abstentions
+(A), and wrong (W) answers when LLMs are prompted
+with 5 ideal passages based on Binary Relevance, eRAG,
+and our utility-based annotations. Results averaged
+across all tested datasets. All differences are statisti-
+cally significant (Wilcoxon, p < 0.05). Detailed results
+in Appendix E.
+13For traditional relevance labeling, we order the passages
+based on their binary relevance labels, with relevant passages
+appearing before irrelevant ones. For passages sharing the
+same relevance status (either all relevant or all irrelevant), we
+applied secondary sorting based on their retrieval scores.
+8364
+
+========== PDF PAGE 7 / 17 ==========
+Llama 3B Llama 8B Llama 70B
+Method NQ Trivia PopQA BioASQ NoMIR NQ Trivia PopQA BioASQ NoMIR NQ Trivia PopQA BioASQ NoMIR
+NDCG 0.458 0.545 0.438 0.618 0.326 0.515 0.623 0.499 0.699 0.332 0.560 0.708 0.669 0.752 0.509
+MRR 0.452 0.543 0.436 0.617 0.315 0.510 0.619 0.501 0.698 0.323 0.560 0.704 0.667 0.751 0.503
+MAP 0.454 0.543 0.438 0.617 0.320 0.513 0.620 0.499 0.697 0.329 0.558 0.707 0.667 0.751 0.506
+PREC 0.482 0.600 0.462 0.631 0.373 0.546 0.671 0.532 0.714 0.369 0.591 0.734 0.682 0.769 0.539
+HITS 0.411 0.559 0.444 0.590 0.358 0.509 0.638 0.514 0.716 0.359 0.570 0.741 0.662 0.804 0.550
+eRAG 0.324 0.219 -0.022 0.290 0.017 0.356 0.265 0.007 0.300 0.031 0.308 0.140 0.010 0.306 -0.053
+UDCG0.5360.6410.5250.665 0.482 0.611 0.711 0.599 0.718 0.5030.6650.803 0.707 0.8020.662
+UDCGθ 0.5320.6410.5120.668 0.487 0.615 0.713 0.610 0.743 0.5030.6610.806 0.714 0.8110.653
+Gemma 4B Mistral 7B Qwen 7B
+Method NQ Trivia PopQA BioASQ NoMIR NQ Trivia PopQA BioASQ NoMIR NQ Trivia PopQA BioASQ NoMIR
+NDCG 0.557 0.572 0.514 0.728 0.531 0.548 0.720 0.438 0.734 0.567 0.471 0.478 0.236 0.665 0.292
+MRR 0.558 0.575 0.518 0.732 0.524 0.546 0.721 0.440 0.735 0.560 0.475 0.474 0.231 0.668 0.283
+MAP 0.555 0.570 0.513 0.728 0.527 0.544 0.718 0.437 0.733 0.564 0.469 0.474 0.232 0.663 0.288
+PREC 0.572 0.595 0.560 0.759 0.561 0.589 0.752 0.503 0.754 0.600 0.510 0.552 0.296 0.699 0.329
+HITS 0.554 0.592 0.524 0.758 0.576 0.542 0.742 0.456 0.768 0.606 0.463 0.459 0.201 0.689 0.305
+eRAG 0.408 0.316 -0.130 0.444 0.023 0.361 0.318 -0.039 0.321 0.017 0.316 0.226 -0.046 0.343 -0.027
+UDCG 0.587 0.6810.6070.7760.6260.6290.7860.542 0.767 0.6090.6050.649 0.397 0.7520.562
+UDCGθ 0.593 0.6820.5980.7930.6180.6340.7830.556 0.777 0.6320.6010.650 0.406 0.7550.550
+Table 3: Spearman correlation between IR metrics and end-to-end RAG accuracy. Bold indicates best per model-
+dataset combination. UDCG improvements are statistically significant (bootstrap, p < 0.05).
+Table 2 reports the average results across the
+five benchmarks. Our annotation schema always
+improves results significantly, demonstrating that
+achieving perfect traditional IR metrics is insuffi-
+cient for optimal RAG performance, calling for the
+development of new evaluation frameworks that
+better align with the objectives of modern retrieval-
+augmented generation systems. In particular, our
+annotation schema, by selecting all possible rele-
+vant passages and completing the context with the
+irrelevant ones that minimize the distracting effect,
+facilitates the LLM task of inferring the right an-
+swer when present in the passage context, leading
+to up to 2% more correct answers than the binary
+relevance labeling. Additionally, when no relevant
+passage is present, the absence of hard distracting
+passages helps the LLM to abstain, reducing by
+half the wrong answers. The improvement w.r.t.
+eRAG is even more evident, and we argue that
+the main reasons for this difference are (i) eRAG
+neglects the damaging impact of distracting doc-
+uments, and (ii) eRAG uses ROUGE-L, which is
+a weak estimator of the answer quality, as other
+token-level answer equivalence measures (Bulian
+et al., 2022).
+7.2 Correlation between IR Metrics and
+Answer Accuracy
+To validate the effectiveness of our proposed met-
+rics, we conducted comprehensive experiments ex-
+amining their correlation with the end-to-end an-
+swer accuracy of the RAG system. Specifically,
+given a question q, we create 10 different contexts
+C1,...,C 10, each one containing 5 passages, which
+we use to generate the corresponding LLM answers
+a1,...,a 10. Then we assess the correctness of each
+answer and sort the contexts so that contexts lead-
+ing to correct answers are positioned first, followed
+by contexts leading to abstation, followed by con-
+texts leading to wrong answers. We compare this
+ideal context ranking with the one induced by a
+metric and compute their Spearman correlation.
+We create contexts by randomly sampling passages
+from the top-25 retrieved ones. We balanced the
+resulting examples so that 50% of the contexts con-
+tain at least a relevant passage, while the remaining
+50% contain only irrelevant passages.
+To learn the θ={α 1,...α k,β1,...β k}param-
+eters of UDCGθ, we use a linear SVMrank model
+(Joachims, 2002) with default hyperparameters14.
+As a training set, we use 1200 query-context ex-
+amples derived from NQ, and tested on 500 query-
+context examples extracted from a disjoint set of
+NQ questions. Furthermore, we assess whether
+the learned metric generalizes to other datasets, by
+testing on 500 query-context samples of TriviaQA,
+PopQA, NoMIRACL, and BioASQ.
+Table 3 reports the results of different LLMs.
+Our proposed metrics, UDCGθ and its training-free
+version UDCG, consistently achieve the best cor-
+relation with the end-to-end RAG accuracy, across
+all LLMs and benchmarks, with UDCG θ achiev-
+14https://www.cs.cornell.edu/people/tj/svm_
+light/svm_rank.html
+8365
+
+========== PDF PAGE 8 / 17 ==========
+Metric L-3B L-8B L-70B G-4B M-7B Q-7B
+UDCGθ 0.532 0.615 0.661 0.593 0.634 0.601
+(rel-only) 0.508 0.594 0.625 0.567 0.607 0.553
+(binary) 0.473 0.542 0.589 0.554 0.584 0.498
+UDCG0.536 0.611 0.665 0.587 0.629 0.605
+(rel-only) 0.515 0.599 0.638 0.572 0.606 0.553
+Table 4: Ablation study. Spearman correlation with
+RAG accuracy. UDCG consistently outperforms
+relevance-only baselines.
+ing a 36% (+10pts) increase in terms of Spearman
+correlation when compared to NDCG (averaging
+across all considered LLMs and datasets). UDCGθ,
+although trained only on NQ, maintains competi-
+tive results on all benchmarks, demonstrating its
+generalized applicability.
+Surprisingly, the difference between UDCG and
+UDCGθ is minor; conversely to UDCG, UDCGθ
+accounts for the passage positions in the prompt,
+but we argue that this information is not very im-
+portant to estimate the end-to-end accuracy. Indeed,
+as observed by Cuconasu et al. (2025), the effect
+of positional bias, which is often amplified in con-
+trolled settings, is marginal in real scenarios.
+7.3 Ablation Study for UDCG
+We examine the contribution of each component in
+our proposed metrics through an ablation study on
+the NQ dataset across all LLMs. Table 4 reports
+the Spearman correlation between metric scores
+and end-to-end RAG accuracy under different con-
+figurations. For UDCG θ, we train three variants
+independently: the full model (see Eq. 3) incor-
+porating both relevance utility features ( u+
+i ) and
+distracting effect features ( u−
+i ); a relevance-only
+version, where we disable the distracting effect fea-
+tures; and a binary version where we additionally
+constrain the relevance utility features u+
+i = 1to
+be binary values reflecting the traditional binary
+relevance labeling. Removing the distracting ef-
+fect (rel-only) causes consistent degradation across
+all models, with correlation drops ranging from
+3.4% to 8%. The binary variant shows even larger
+degradation, with drops of up to 17%, highlight-
+ing the importance of our fine-grained utility-based
+annotations over binary relevance judgments. For
+the training-free version of UDCG, we compare
+the full model (see Eq. 4) against a relevance-only
+version (γ= 0 ), which completely removes the
+1 2 3 4 5 6 7 8 9 10
+Number of retrieved documents (k)
+0.3
+0.4
+0.5
+0.6
+0.7Spearman correlation
+NDCG
+PREC
+UDCG
+UDCG
+Figure 2: IR metric robustness across context sizes for
+Qwen 7B. UDCG maintains a stable correlation with
+RAG accuracy for allk.
+contribution of distracting passages15. Consistent
+with UDCGθ, removing distracting effects leads to
+an average correlation decrease of 4%. These re-
+sults confirm that our utility-based scoring, which
+includes the distracting effects, is essential for ac-
+curately predicting RAG system effectiveness.
+7.4 Sensitivity to Context Length
+We evaluate whether our proposed metrics maintain
+consistent predictive power as the number of re-
+trieved documents k varies. We conduct this study
+using Qwen 7B on NQ, systematically varying k
+from 1 to 10 passages. We limit our analysis to
+k≤10 because additional documents at lower
+ranks would likely consist of distractors with a neg-
+ative impact on the generation quality (Cuconasu
+et al., 2025). Figure 2 presents the results. UDCG
+demonstrates remarkable stability across different
+context sizes, maintaining correlations between
+0.554 and 0.704, while consistently outperform-
+ing all baseline metrics across all values of k. In
+contrast, traditional IR metrics show substantially
+more volatility, with NDCG and Precision exhibit-
+ing standard deviations that are respectively 1.6 and
+1.38 times higher than UDCG16. Extended results
+are presented in Appendix F.
+8 Conclusions
+This paper addresses a fundamental misalignment
+between traditional information retrieval evalua-
+tion metrics and the requirements of modern RAG
+systems. We demonstrated that classical IR met-
+rics like nDCG, MAP, and MRR fail to adequately
+predict RAG performance because they assume
+15Note that further substituting continuous utility with bi-
+nary relevance yields Precision (see Table 3).
+16UDCGθ shows similar stability but requires training for
+eachk, making it less practical for dynamic context sizes.
+8366
+
+========== PDF PAGE 9 / 17 ==========
+monotonically decreasing document utility with
+rank position and ignore the heterogeneous dis-
+tracting effects of irrelevant documents on LLM
+generation quality. To address these limitations, we
+proposed a novel RAG-oriented annotation schema
+that replaces the human-centric notion of passage
+relevance with positive or negative passage util-
+ity for an LLM. Building on this foundation, we
+defined UDCG, a metric using an LLM-oriented
+positional discount to directly optimize the correla-
+tion with the end-to-end answer accuracy. Notably,
+we have shown that removing positional discount-
+ing entirely achieves nearly identical performance.
+Our extensive experiments on five QA datasets and
+six LLMs demonstrate that both metrics consis-
+tently outperform traditional IR metrics and exist-
+ing RAG-oriented approaches in predicting end-to-
+end system performance by up to 36%.
+Limitations
+Our work has some limitations that suggest direc-
+tions for future research. First, our experiments fo-
+cus on the question-answering task where queries
+have specific and verifiable answers. The applica-
+bility of our metrics to other tasks, such as multi-
+hop question answering or fact verification, re-
+mains unexplored. Second, our utility-based an-
+notation schema requires access to the LLM’s out-
+put probabilities to compute abstention likelihood.
+This requirement limits our approach to settings
+where logit access is available, excluding black-
+box commercial APIs that only return generated
+text. We discussed counterstrategies in Appendix
+D. Third, our evaluation is conducted exclusively
+on English-language datasets. The effectiveness
+of our utility-based scoring and the UDCG metric
+in multilingual or cross-lingual RAG settings re-
+mains to be investigated, as language-specific char-
+acteristics may influence both passage utility and
+distracting effects. Our experiments rely on BGE-
+large-en-v1.5 as the embedding model for passage
+retrieval, as it offered strong baseline performance
+across our benchmarks. However, we have not
+systematically evaluated how our utility-based an-
+notation schema and UDCG metric perform with
+other retrieval systems, such as sparse retrievers or
+alternative dense retrievers.
+References
+Chen Amiraz, Florin Cuconasu, Simone Filice, and
+Zohar Karnin. 2025. The distracting effect: Under-
+standing irrelevant passages in RAG. InProceedings
+of the 63rd Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers),
+pages 18228–18258, Vienna, Austria. Association
+for Computational Linguistics.
+Jannis Bulian, Christian Buck, Wojciech Gajewski, Ben-
+jamin Börschinger, and Tal Schuster. 2022. Tomayto,
+tomahto. beyond token-level answer equivalence for
+question answering evaluation. InProceedings of the
+2022 Conference on Empirical Methods in Natural
+Language Processing, pages 291–305, Abu Dhabi,
+United Arab Emirates. Association for Computa-
+tional Linguistics.
+Jianlv Chen, Shitao Xiao, Peitian Zhang, Kun Luo, Defu
+Lian, and Zheng Liu. 2024a. BGE M3-embedding:
+Multi-lingual, multi-functionality, multi-granularity
+text embeddings through self-knowledge distillation.
+Preprint, arXiv:2402.03216.
+Jiawei Chen, Hongyu Lin, Xianpei Han, and Le Sun.
+2024b. Benchmarking large language models in
+retrieval-augmented generation. InProceedings of
+the Thirty-Eighth AAAI Conference on Artificial
+Intelligence and Thirty-Sixth Conference on Inno-
+vative Applications of Artificial Intelligence and
+Fourteenth Symposium on Educational Advances in
+Artificial Intelligence, AAAI’24/IAAI’24/EAAI’24.
+AAAI Press.
+Florin Cuconasu, Simone Filice, Guy Horowitz, Yoelle
+Maarek, and Fabrizio Silvestri. 2025. Do RAG sys-
+tems really suffer from positional bias? InProceed-
+ings of the 2025 Conference on Empirical Methods in
+Natural Language Processing, pages 28022–28036,
+Suzhou, China. Association for Computational Lin-
+guistics.
+Florin Cuconasu, Giovanni Trappolini, Federico Sicil-
+iano, Simone Filice, Cesare Campagnano, Yoelle
+Maarek, Nicola Tonellotto, and Fabrizio Silvestri.
+2024. The power of noise: Redefining retrieval for
+rag systems. InProceedings of the 47th Interna-
+tional ACM SIGIR Conference on Research and De-
+velopment in Information Retrieval, SIGIR ’24, page
+719–729, New York, NY , USA. Association for Com-
+puting Machinery.
+Edward Cutrell and Zhiwei Guan. 2007. What are you
+looking for? an eye-tracking study of information
+usage in web search. InProceedings of the SIGCHI
+Conference on Human Factors in Computing Sys-
+tems, CHI ’07, page 407–416, New York, NY , USA.
+Association for Computing Machinery.
+Lu Dai, Yijie Xu, Jinhui Ye, Hao Liu, and Hui Xiong.
+2025. Seper: Measure retrieval utility through the
+lens of semantic perplexity reduction. InThe Thir-
+teenth International Conference on Learning Repre-
+sentations.
+Giulio D’Erasmo, Giovanni Trappolini, Fabrizio Sil-
+vestri, and Nicola Tonellotto. 2025. Eclipse:
+Contrastive dimension importance estimation with
+8367
+
+========== PDF PAGE 10 / 17 ==========
+pseudo-irrelevance feedback for dense retrieval. In
+Proceedings of the 2025 International ACM SIGIR
+Conference on Innovative Concepts and Theories in
+Information Retrieval (ICTIR), pages 147–154.
+Wenqi Fan, Yujuan Ding, Liangbo Ning, Shijie Wang,
+Hengyun Li, Dawei Yin, Tat-Seng Chua, and Qing
+Li. 2024. A survey on RAG meeting LLMs: To-
+wards retrieval-augmented large language models. In
+Proceedings of the 30th ACM SIGKDD Conference
+on Knowledge Discovery and Data Mining, pages
+6491–6501.
+Yunfan Gao, Yun Xiong, Xinyu Gao, Kangxiang Jia,
+Jinliu Pan, Yuxi Bi, Yi Dai, Jiawei Sun, Meng Wang,
+and Haofen Wang. 2024. Retrieval-augmented gener-
+ation for large language models: A survey.Preprint,
+arXiv:2312.10997.
+Laura A. Granka, Thorsten Joachims, and Geri Gay.
+2004. Eye-tracking analysis of user behavior in www
+search. InProceedings of the 27th Annual Inter-
+national ACM SIGIR Conference on Research and
+Development in Information Retrieval, SIGIR ’04,
+page 478–479, New York, NY , USA. Association for
+Computing Machinery.
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri,
+Abhinav Pandey, Abhishek Kadian, Ahmad Al-
+Dahle, Aiesha Letman, Akhil Mathur, Alan Schel-
+ten, Alex Vaughan, Amy Yang, Angela Fan, Anirudh
+Goyal, Anthony Hartshorn, Aobo Yang, Archi Mi-
+tra, Archie Sravankumar, Artem Korenev, Arthur
+Hinsvark, and 542 others. 2024. The llama 3 herd of
+models.Preprint, arXiv:2407.21783.
+Jiawei Gu, Xuhui Jiang, Zhichao Shi, Hexiang Tan,
+Xuehao Zhai, Chengjin Xu, Wei Li, Yinghan Shen,
+Shengjie Ma, Honghao Liu, Saizhuo Wang, Kun
+Zhang, Yuanzhuo Wang, Wen Gao, Lionel Ni,
+and Jian Guo. 2025. A survey on llm-as-a-judge.
+Preprint, arXiv:2411.15594.
+Jan Hutter, David Rau, Maarten Marx, and Jaap Kamps.
+2025. Lost but not only in the middle: Positional
+bias in retrieval augmented generation. InAdvances
+in Information Retrieval: 47th European Conference
+on Information Retrieval, ECIR 2025, Lucca, Italy,
+April 6–10, 2025, Proceedings, Part I, page 247–261,
+Berlin, Heidelberg. Springer-Verlag.
+Gautier Izacard and Edouard Grave. 2021. Leveraging
+passage retrieval with generative models for open do-
+main question answering. InProceedings of the 16th
+Conference of the European Chapter of the Associ-
+ation for Computational Linguistics: Main Volume,
+pages 874–880, Online. Association for Computa-
+tional Linguistics.
+Kalervo Järvelin and Jaana Kekäläinen. 2002. Cumu-
+lated gain-based evaluation of ir techniques.ACM
+Trans. Inf. Syst., 20(4):422–446.
+Albert Q. Jiang, Alexandre Sablayrolles, Arthur Men-
+sch, Chris Bamford, Devendra Singh Chaplot, Diego
+de las Casas, Florian Bressand, Gianna Lengyel, Guil-
+laume Lample, Lucile Saulnier, Lélio Renard Lavaud,
+Marie-Anne Lachaux, Pierre Stock, Teven Le Scao,
+Thibaut Lavril, Thomas Wang, Timothée Lacroix,
+and William El Sayed. 2023. Mistral 7b.Preprint,
+arXiv:2310.06825.
+Bowen Jin, Jinsung Yoon, Jiawei Han, and Sercan O
+Arik. 2025. Long-context LLMs meet RAG: Over-
+coming challenges for long inputs in RAG. InThe
+Thirteenth International Conference on Learning
+Representations.
+Thorsten Joachims. 2002. Optimizing search engines
+using clickthrough data. InProceedings of the Eighth
+ACM SIGKDD International Conference on Knowl-
+edge Discovery and Data Mining, KDD ’02, page
+133–142, New York, NY , USA. Association for Com-
+puting Machinery.
+Mandar Joshi, Eunsol Choi, Daniel S Weld, and Luke
+Zettlemoyer. 2017. TriviaQA: A large scale distantly
+supervised challenge dataset for reading comprehen-
+sion. InProceedings of the 55th Annual Meeting of
+the Association for Computational Linguistics (Vol-
+ume 1: Long Papers), pages 1601–1611.
+Mohammed Abdul Khaliq, Paul Yu-Chun Chang,
+Mingyang Ma, Bernhard Pflugfelder, and Filip
+Mileti´c. 2024. RAGAR, your falsehood radar: RAG-
+augmented reasoning for political fact-checking us-
+ing multimodal large language models. InProceed-
+ings of the Seventh Fact Extraction and VERification
+Workshop (FEVER), pages 280–296, Miami, Florida,
+USA. Association for Computational Linguistics.
+Tom Kwiatkowski, Jennimaria Palomaki, Olivia Red-
+field, Michael Collins, Ankur Parikh, Chris Alberti,
+Danielle Epstein, Illia Polosukhin, Jacob Devlin, Ken-
+ton Lee, and 1 others. 2019. Natural questions: a
+benchmark for question answering research.Trans-
+actions of the Association for Computational Linguis-
+tics, 7:453–466.
+J. Richard Landis and Gary G. Koch. 1977. The mea-
+surement of observer agreement for categorical data.
+Biometrics, 33(1).
+Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio
+Petroni, Vladimir Karpukhin, Naman Goyal, Hein-
+rich Küttler, Mike Lewis, Wen-tau Yih, Tim Rock-
+täschel, and 1 others. 2020. Retrieval-augmented
+generation for knowledge-intensive NLP tasks.Ad-
+vances in Neural Information Processing Systems,
+33:9459–9474.
+Chin-Yew Lin. 2004. ROUGE: A package for auto-
+matic evaluation of summaries. InText Summariza-
+tion Branches Out, pages 74–81, Barcelona, Spain.
+Association for Computational Linguistics.
+Xi Victoria Lin, Xilun Chen, Mingda Chen, Wei-
+jia Shi, Maria Lomeli, Richard James, Pedro Ro-
+driguez, Jacob Kahn, Gergely Szilvasy, Mike Lewis,
+Luke Zettlemoyer, and Scott Yih. 2024. RA-DIT:
+Retrieval-augmented dual instruction tuning. InThe
+8368
+
+========== PDF PAGE 11 / 17 ==========
+Twelfth International Conference on Learning Repre-
+sentations.
+Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paran-
+jape, Michele Bevilacqua, Fabio Petroni, and Percy
+Liang. 2024. Lost in the middle: How language mod-
+els use long contexts.Transactions of the Association
+for Computational Linguistics, 12:157–173.
+Alex Troy Mallen, Akari Asai, Victor Zhong, Rajarshi
+Das, Daniel Khashabi, and Hannaneh Hajishirzi.
+2023. When not to trust language models: Investigat-
+ing effectiveness of parametric and non-parametric
+memories. InThe 61st Annual Meeting Of The Asso-
+ciation For Computational Linguistics.
+Christopher D. Manning, Prabhakar Raghavan, and Hin-
+rich Schütze. 2008.Introduction to Information Re-
+trieval. Cambridge University Press, USA.
+Fabio Petroni, Aleksandra Piktus, Angela Fan, Patrick
+Lewis, Majid Yazdani, Nicola De Cao, James Thorne,
+Yacine Jernite, Vladimir Karpukhin, Jean Maillard,
+Vassilis Plachouras, Tim Rocktäschel, and Sebastian
+Riedel. 2021. KILT: a benchmark for knowledge
+intensive language tasks. InProceedings of the 2021
+Conference of the North American Chapter of the
+Association for Computational Linguistics: Human
+Language Technologies, pages 2523–2544, Online.
+Association for Computational Linguistics.
+Hossein A. Rahmani, Clemencia Siro, Mohammad
+Aliannejadi, Nick Craswell, Charles L. A. Clarke,
+Guglielmo Faggioli, Bhaskar Mitra, Paul Thomas,
+and Emine Yilmaz. 2024. Report on the 1st workshop
+on large language model for evaluation in informa-
+tion retrieval (llm4eval 2024) at sigir 2024.Preprint,
+arXiv:2408.05388.
+Alireza Salemi and Hamed Zamani. 2024. Evaluating
+retrieval quality in retrieval-augmented generation.
+InProceedings of the 47th International ACM SI-
+GIR Conference on Research and Development in
+Information Retrieval, SIGIR ’24, page 2395–2400,
+New York, NY , USA. Association for Computing
+Machinery.
+Xin Sun, Jianan Xie, Zhongqi Chen, Qiang Liu, Shu Wu,
+Yuehe Chen, Bowen Song, Zilei Wang, Weiqiang
+Wang, and Liang Wang. 2025. Divide-then-align:
+Honest alignment based on the knowledge boundary
+of RAG. InProceedings of the 63rd Annual Meeting
+of the Association for Computational Linguistics (Vol-
+ume 1: Long Papers), pages 11461–11480, Vienna,
+Austria. Association for Computational Linguistics.
+Gemma Team, Aishwarya Kamath, Johan Ferret, Shreya
+Pathak, Nino Vieillard, Ramona Merhej, Sarah Perrin,
+Tatiana Matejovicova, Alexandre Ramé, Morgane
+Rivière, Louis Rouillard, Thomas Mesnard, Geoffrey
+Cideron, Jean bastien Grill, Sabela Ramos, Edouard
+Yvinec, Michelle Casbon, Etienne Pot, Ivo Penchev,
+and 197 others. 2025. Gemma 3 technical report.
+Preprint, arXiv:2503.19786.
+Nandan Thakur, Luiz Bonifacio, Crystina Zhang,
+Odunayo Ogundepo, Ehsan Kamalloo, David
+Alfonso-Hermelo, Xiaoguang Li, Qun Liu, Box-
+ing Chen, Mehdi Rezagholizadeh, and Jimmy Lin.
+2024. “knowing when you don’t know”: A multilin-
+gual relevance assessment dataset for robust retrieval-
+augmented generation. InFindings of the Association
+for Computational Linguistics: EMNLP 2024, pages
+12508–12526, Miami, Florida, USA. Association for
+Computational Linguistics.
+Fangzheng Tian, Debasis Ganguly, and Craig Macdon-
+ald. 2025. Is relevance propagated from retriever to
+generator in rag?Preprint, arXiv:2502.15025.
+George Tsatsaronis, Georgios Balikas, Prodromos
+Malakasiotis, Ioannis Partalas, Matthias Zschunke,
+Michael R Alvers, Dirk Weissenborn, Anastasia
+Krithara, Sergios Petridis, Dimitris Polychronopou-
+los, Yannis Almirantis, John Pavlopoulos, Nico-
+las Baskiotis, Patrick Gallinari, Thierry Artieres,
+Axel Ngonga, Norman Heino, Eric Gaussier, Liliana
+Barrio-Alvers, and 3 others. 2015. An overview of
+the bioasq large-scale biomedical semantic indexing
+and question answering competition.BMC Bioinfor-
+matics, 16:138.
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob
+Uszkoreit, Llion Jones, Aidan N Gomez, Ł ukasz
+Kaiser, and Illia Polosukhin. 2017. Attention is all
+you need. InAdvances in Neural Information Pro-
+cessing Systems, volume 30. Curran Associates, Inc.
+Jonas Wallat, Maria Heuss, Maarten de Rijke, and
+Avishek Anand. 2025. Correctness is not faithful-
+ness in retrieval augmented generation attributions.
+InProceedings of the 2025 International ACM SIGIR
+Conference on Innovative Concepts and Theories
+in Information Retrieval (ICTIR), ICTIR ’25, page
+22–32, New York, NY , USA. Association for Com-
+puting Machinery.
+Rongwu Xu, Zehan Qi, Zhijiang Guo, Cunxiang Wang,
+Hongru Wang, Yue Zhang, and Wei Xu. 2024.
+Knowledge conflicts for LLMs: A survey. InPro-
+ceedings of the 2024 Conference on Empirical Meth-
+ods in Natural Language Processing, pages 8541–
+8565, Miami, Florida, USA. Association for Compu-
+tational Linguistics.
+An Yang, Baosong Yang, Beichen Zhang, Binyuan
+Hui, Bo Zheng, Bowen Yu, Chengyuan Li, Dayi-
+heng Liu, Fei Huang, Haoran Wei, Huan Lin, Jian
+Yang, Jianhong Tu, Jianwei Zhang, Jianxin Yang, Ji-
+axi Yang, Jingren Zhou, Junyang Lin, Kai Dang, and
+23 others. 2025. Qwen2.5 technical report.Preprint,
+arXiv:2412.15115.
+Ori Yoran, Tomer Wolfson, Ori Ram, and Jonathan Be-
+rant. 2024. Making retrieval-augmented language
+models robust to irrelevant context. InThe Twelfth
+International Conference on Learning Representa-
+tions.
+8369
+
+========== PDF PAGE 12 / 17 ==========
+Hao Yu, Aoran Gan, Kai Zhang, Shiwei Tong, Qi Liu,
+and Zhaofeng Liu. 2025.Evaluation of Retrieval-
+Augmented Generation: A Survey, page 102–120.
+Springer Nature Singapore.
+Wenhao Yu, Hongming Zhang, Xiaoman Pan, Peixin
+Cao, Kaixin Ma, Jian Li, Hongwei Wang, and Dong
+Yu. 2024. Chain-of-note: Enhancing robustness in
+retrieval-augmented language models. InProceed-
+ings of the 2024 Conference on Empirical Methods in
+Natural Language Processing, pages 14672–14685,
+Miami, Florida, USA. Association for Computational
+Linguistics.
+Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan
+Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin,
+Zhuohan Li, Dacheng Li, Eric Xing, Hao Zhang,
+Joseph E. Gonzalez, and Ion Stoica. 2023. Judging
+LLM-as-a-judge with MT-bench and chatbot arena.
+InThirty-seventh Conference on Neural Information
+Processing Systems Datasets and Benchmarks Track.
+A Traditional IR Metrics
+The offline evaluation of information retrieval sys-
+tems relies heavily on a well-established set of met-
+rics that measure different aspects of retrieval per-
+formance. These traditional metrics have relevance
+as a central notion, which represents the degree to
+which a retrieved document satisfies a user’s infor-
+mation need. The conventional approach to rele-
+vance in IR has been predominantly binary, where
+documents are classified as either relevant or non-
+relevant to a given query. The IR metrics proposed
+in the literature mostly differ in how they account
+for the presence and positioning of relevant docu-
+ments in the retrieved document rank.
+Precision and Recall serve as the foundational
+metrics in IR evaluation. Precision measures the
+fraction of retrieved documents that are relevant,
+while recall measures the fraction of relevant docu-
+ments that are successfully retrieved. For mod-
+ern (web-scale) information retrieval, recall is
+no longer a meaningful metric, as many queries
+have thousands of relevant documents, and few
+users will be interested in reading all of them.
+Precision@k (P@k), by measuring precision at
+fixed cutoff points, reflects practical constraints
+where users typically examine only the top- k re-
+sults.
+Mean Average Precision (MAP) extends previ-
+ous metrics by incorporating ranking information.
+MAP computes the average precision at each rel-
+evant document position and then averages across
+all queries in a test collection. This metric ef-
+fectively rewards systems that rank relevant docu-
+ments higher in the result list, making it particularly
+suitable for evaluating systems where users exam-
+ine results sequentially. More formally:
+MAP= 1
+|Q|
+∑
+q∈Q
+1
+Rq
+n∑
+k=1
+P@k×r(k)
+where Qis the set of test queries, Rq is the number
+of existing relevant documents for query q, n is
+the number of retrieved documents, and r(k) is an
+indicator function equaling 1 if the item at rank k
+is a relevant document, zero otherwise.
+Mean Reciprocal Rank (MRR) focuses specifi-
+cally on the rank position of the first relevant docu-
+ment, making it particularly appropriate for naviga-
+tional queries where users seek a single correct an-
+swer. MRR computes the reciprocal of the rank at
+which the first relevant document appears, namely
+ranki, and averages this value across all queries:
+MRR= 1
+|Q|
+∑
+q∈Q
+1
+ranki
+Normalized Discounted Cumulative Gain
+(nDCG) enables the usage of graded relevance
+judgments rather than binary values. nDCG
+recognizes that documents can have varying
+degrees of relevance and that highly relevant
+documents should contribute more to the overall
+evaluation score. The metric applies a logarithmic
+discount function to reduce the contribution of
+documents at lower ranks, reflecting the realistic
+assumption that users are less likely to examine
+documents further down in the ranking. The DCG
+accumulated at a particular rank position p is
+defined as:
+DCGp =
+p∑
+i=1
+reli
+log2(i+ 1)
+where reli is the graded relevance of the result at
+position i retrieved for the query q. This value
+is typically normalized to facilitate comparison
+across queries with different numbers of relevant
+documents. To this end, we sort documents of a
+result list by relevance, producing an ideal DCG at
+position p(IDCGp), and use this value as a normal-
+ization factor:
+nDCGp = DCGp
+IDCGp
+The nDCG values for all queries can be averaged
+to obtain a measure of the average performance of
+a search engine’s ranking algorithm.
+Finally, HITS measures whether there is at least
+a relevant passage in the top-kretrieved ones.
+8370
+
+========== PDF PAGE 13 / 17 ==========
+B Open-source Alternative for Relevance
+In Section 6.2, we describe our method to compute
+the relevance of a passage with an LLM-as-a-Judge
+approach. In our analysis, we used Claude 3.7
+Sonnet; however, we also tested Llama-3.3-70B
+Instruct as a strong open-source alternative for our
+evaluation tasks. We sampled 300 queries from our
+datasets and evaluated relevance decisions for the
+top-5 passages retrieved by BGE using both mod-
+els, analyzing a total of 1500 passages. For passage
+relevance assessment, the Cohen’s Kappa coeffi-
+cient between Claude and Llama yielded a score
+of 0.85, indicating substantial agreement according
+to standard interpretation guidelines (Landis and
+Koch, 1977). These results suggest that Llama-3.3-
+70B Instruct can serve as a reliable open-source al-
+ternative for passage relevance assessment in RAG
+experiments.
+C Log-Likelihood as an estimator
+We conducted additional experiments comparing
+our p(NO-RESPONSE) approach (UDCG) with
+the log-likelihood of the correct answer as the util-
+ity estimator (ANSWER_PROB). We tested both
+methods on NQ using Llama 3B, Llama 8B, and
+Qwen 7B as seen in Table 5.
+Method Llama 3B Llama 8B Qwen 7B
+NDCG 0.458 0.515 0.471
+PREC 0.482 0.546 0.510
+eRAG 0.324 0.356 0.316
+ANSWER_PROB 0.227 0.233 0.212
+UDCG0.5360.6110.605
+UDCGθ 0.5320.6150.601
+Table 5: Spearman correlation between IR metrics and
+end-to-end RAG accuracy on NQ dataset. Bold indi-
+cates best per model.
+Our UDCG metric consistently outperforms the
+log-likelihood approach across all models. This
+superiority arises from two key advantages:
+•p(NO-RESPONSE) naturally captures the dis-
+tracting effect of irrelevant passages: when an
+irrelevant passage is distracting, the model
+fails to abstain and produces an incorrect re-
+sponse. In contrast, the log-likelihood ap-
+proach cannot quantify this negative utility
+since irrelevant passages do not contain the
+correct answer.
+• The log-likelihood method introduces signifi-
+cant noise when expected answers are long or
+when models are prone to generate seman-
+tically equivalent but lexically different re-
+sponses, making it unreliable for measuring
+passage utility.
+These limitations also affect eRAG, which uses
+ROUGE-L scores and similarly cannot distinguish
+between weakly and strongly distracting passages,
+explaining why both alternatives lag significantly
+behind UDCG. Beyond our results, the robustness
+of p(NO-RESPONSE) is further validated by prior
+work (Amiraz et al., 2025), which demonstrates its
+effectiveness in quantifying the distracting impact
+of irrelevant passages in RAG systems.
+D Black-Box Models
+Black-Box Models common in API LLMs may not
+provide odds for p(NO-RESPONSE). However,
+we note:
+• Log probabilities are available in some
+commercial APIs. For example, OpenAI’s
+API exposes logprobs ( https://platform.
+openai.com/docs/api-reference/chat/
+create#chat-create-logprobs), and
+Gemini’s API provides a similar func-
+tionality ( https://ai.google.dev/api/
+generate-content).
+• For completely black-box cases, we can em-
+ploy a Monte Carlo approach. For APIs
+that provide only sampled text, a practical
+workaround is to generate multiple answers
+(e.g., n=10-20) with high temperature and es-
+timate the abstention probability as the fre-
+quency of abstention responses. While this
+increases cost linearly with the number of
+samples, it remains more efficient than full
+end-to-end evaluation, which requires gener-
+ating answers for complete passage sets rather
+than individual passages.
+• Many production RAG systems use open-
+weight models (Llama, Mistral, Qwen, etc.)
+where logits are directly accessible, making
+our approach immediately applicable to a
+large segment of real-world deployments.
+E Expanded Results for Evaluation of
+Annotation Schema
+Table 6 presents detailed results from Table 2,
+showing the percentage of correct (C), absten-
+tions (A), and wrong (W) answers when LLMs
+8371
+
+========== PDF PAGE 14 / 17 ==========
+Dataset LLM Binary Rel. eRAG Our Method
+C↑A W↓C↑A W↓C↑A W↓
+BioASQ
+Llama 3B 83.1 7.5 9.4 78.0 12.9 9.1 84.7 9.55.8
+Llama 8B 87.0 7.1 5.9 81.8 11.1 7.1 88.2 8.23.6
+Llama 70B 89.3 3.7 7.0 86.1 7.0 6.9 91.3 5.82.9
+Gemma 4B 84.9 2.6 12.5 84.5 4.4 11.1 86.2 5.88.0
+Mistral 7B 88.6 2.9 8.5 86.7 3.9 9.4 89.1 6.54.4
+Qwen 7B 87.2 6.2 6.6 84.9 7.6 7.5 88.1 7.64.3
+NoMIRACL
+Llama 3B 65.9 21.9 12.2 44.4 36.8 18.8 66.1 27.56.4
+Llama 8B 67.7 24.7 7.6 47.7 40.8 11.5 66.6 29.14.3
+Llama 70B 71.1 20.8 8.1 49.9 37.8 12.3 71.8 25.82.4
+Gemma 4B 69.2 13.7 17.1 50.3 23.3 26.4 69.3 19.111.6
+Mistral 7B 70.0 15.9 14.1 47.2 28.9 23.9 69.8 21.09.2
+Qwen 7B 66.9 24.6 8.5 45.0 41.1 13.9 67.1 28.74.2
+NQ
+Llama 3B 70.8 12.4 16.8 69.9 13.2 16.9 72.3 16.711.0
+Llama 8B 71.7 15.0 13.3 72.5 14.8 12.7 75.6 17.37.1
+Llama 70B 79.3 9.7 11.0 78.5 10.6 10.9 81.8 14.04.2
+Gemma 4B 74.6 6.2 19.2 73.8 7.5 18.7 76.6 10.213.2
+Mistral 7B 76.1 9.4 14.5 75.2 8.6 16.2 78.1 14.17.8
+Qwen 7B 74.3 13.7 12.0 73.3 14.2 12.5 75.5 17.76.8
+PopQA
+Llama 3B 55.6 16.6 27.8 29.8 41.6 28.6 59.4 29.810.8
+Llama 8B 55.5 23.7 20.8 37.1 40.0 22.9 60.3 34.15.6
+Llama 70B 64.5 18.3 17.2 32.3 50.5 17.2 67.4 29.03.6
+Gemma 4B 58.7 7.2 34.1 40.2 14.8 45.0 63.6 20.515.9
+Mistral 7B 58.4 19.9 21.7 17.9 57.8 24.3 59.2 33.77.1
+Qwen 7B 49.8 36.0 14.2 26.3 54.8 18.9 53.9 40.85.3
+TriviaQA
+Llama 3B 82.5 8.6 8.9 80.5 10.5 9.0 81.8 11.36.9
+Llama 8B 85.6 8.9 5.5 82.9 11.3 5.8 85.0 11.33.7
+Llama 70B 87.8 8.0 4.2 82.9 12.7 4.4 88.9 9.02.1
+Gemma 4B 83.5 8.3 8.2 84.2 8.5 7.3 84.1 10.05.9
+Mistral 7B 88.0 4.4 7.6 86.7 5.0 8.3 88.1 7.44.5
+Qwen 7B 82.5 11.8 5.7 81.2 14.0 4.8 82.8 14.03.2
+Table 6: Percentage of correct (C) answers, abstentions (A), and wrong (W) answers when LLMs are prompted ideal
+passages based on Binary Relevance, eRAG, and our utility-based annotations. Results across all tested datasets.
+Bold indicates best performance (lowest W).
+are prompted with oracle-selected passages based
+on three annotation methods: Binary Relevance,
+eRAG, and our utility-based approach. Our ap-
+proach achieves consistent improvements over
+baselines across all six LLMs and five datasets.
+F Extended Results for Sensitivity to
+Context Length
+In Figure 3 we extend the analysis of Section 7.4
+to 3 datasets and 3 models.
+8372
+
+========== PDF PAGE 15 / 17 ==========
+NDCG Precision UDCG UDCGθ
+1 2 3 4 5 6 7 8 9100.3
+0.4
+0.5
+0.6
+0.7
+Number of retrieved documents (k)Spearman correlation
+Qwen 7B - NQ
+1 2 3 4 5 6 7 8 9100.6
+0.65
+0.7
+0.75
+0.8
+0.85
+Number of retrieved documents (k)Spearman correlation
+Qwen 7B - BioASQ
+1 2 3 4 5 6 7 8 910
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+Number of retrieved documents (k)Spearman correlation
+Qwen 7B - PopQA
+1 2 3 4 5 6 7 8 910
+0.4
+0.5
+0.6
+0.7
+0.8
+Number of retrieved documents (k)Spearman correlation
+Llama 8B - NQ
+1 2 3 4 5 6 7 8 910
+0.65
+0.7
+0.75
+0.8
+Number of retrieved documents (k)Spearman correlation
+Llama 8B - BioASQ
+1 2 3 4 5 6 7 8 910
+0.4
+0.5
+0.6
+0.7
+0.8
+Number of retrieved documents (k)Spearman correlation
+Llama 8B - PopQA
+1 2 3 4 5 6 7 8 9100.4
+0.5
+0.6
+0.7
+Number of retrieved documents (k)Spearman correlation
+Llama 3B - NQ
+1 2 3 4 5 6 7 8 9100.5
+0.6
+0.7
+0.8
+Number of retrieved documents (k)Spearman correlation
+Llama 3B - BioASQ
+1 2 3 4 5 6 7 8 910
+0.4
+0.5
+0.6
+0.7
+Number of retrieved documents (k)Spearman correlation
+Llama 3B - PopQA
+Figure 3: IR metric robustness across context sizes for three LLMs (Qwen 7B, Llama 8B, Llama 3B) on three
+datasets (NQ, BioASQ, PopQA). UDCG maintains stable correlation with RAG accuracy across all values of k,
+consistently outperforming traditional metrics.
+You are given a question and you must respond based on the provided documents. Respond directly
+without providing any premise or explanation. If none of the documents contain the answer, please
+respond with NO-RESPONSE. Do not try to respond based on your own knowledge.
+Documents:
+<document>
+Question:
+<question>
+Answer:
+Figure 4: Prompt for evaluating the utility of a document and for answer generation.
+8373
+
+========== PDF PAGE 16 / 17 ==========
+Determine if a document is RELEVANT or IRRELEVANT for answering a question. A document is
+RELEVANT if it contains information that directly supports at least one acceptable answer.
+RELEVANT examples:
+- Q: "where does the story the great gatsby take place" | Answers: ['Long Island of 1922']
+Doc: "The Great Gatsby...follows characters living in West Egg on Long Island in summer of 1922"
+→Contains the exact answer
+- Q: "when did korn's follow the leader come out" | Answers: ['August 18, 1998','Summer 1998']
+Doc: "Follow the Leader...was released on August 18, 1998"
+→Contains the exact release date
+IRRELEVANT examples:
+- Q: "where does the story the great gatsby take place" | Answers: ['Long Island of 1922']
+Doc: "While Long Island features prominently in American literature, the socioeconomic
+dynamics..."
+→Mentions Long Island but not as the story's setting
+- Q: "who played bobby byrd in get on up" | Answers: ['Nelsan Ellis']
+Doc: "Critics praised the casting of Bobby Byrd and the chemistry between the main characters...
+→Discusses casting but doesn't name the specific actor
+Evaluation steps:
+1. Find the specific information needed to match an acceptable answer. Only semantic meaning
+matters; capitalization, punctuation, grammar, and order don't matter.
+2. Check if the document contains this information directly or through clear inference
+3. Check for these common errors:
+- The document contains similar keywords/themes but not the actual answer
+- The document contains partial information that would need to be combined with external
+knowledge
+- The document discusses related topics but doesn't specifically answer the question
+Here is a new example. Don't apologize or correct yourself if there was a mistake; we are just
+trying to evaluate the relevance of the document.
+```
+Question: {question}
+Acceptable answers list: {answers}
+Document: {document}
+```
+Evaluate the document for this new question as one of:
+A: RELEVANT
+B: IRRELEVANT
+Return a JSON object with the following format:
+{
+"motivation": "Brief explanation (max 2 sentences)",
+"grade": "A" or "B"
+}
+Figure 5: Prompt template for document relevance assessment using Claude 3.7 Sonnet as judge.
+8374
+
+========== PDF PAGE 17 / 17 ==========
+Your job is to grade a predicted answer as CORRECT, INCORRECT, or ABSTAINED against a list of acceptable answers.
+## Grading Rules
+A predicted answer is CORRECT if:
+- It contains the essential information from at least one acceptable answer
+- It contains no contradictory information
+- When the acceptable answer is a list, at least one item from that list is present
+A predicted answer is INCORRECT if:
+- It contradicts any acceptable answer
+- It contains factually wrong information (even with hedging like "I think" or "possibly")
+A predicted answer is ABSTAINED if:
+- It explicitly refuses to answer or states uncertainty without providing substantive information
+- It contains phrases like "I don't know", "I'm not sure", "I cannot answer", "NO-RESPONSE", "I'm uncertain"
+## Examples
+**CORRECT answers:**
+```
+Question: What are Barack Obama's children's names?
+Acceptable: ['Malia Obama and Sasha Obama','Natasha Marian and Malia Ann']
+"Malia and Sasha" (essential info present)
+"I believe it's Malia and Sasha Obama" (hedging with correct info)
+```
+**INCORRECT answers:**
+```
+Question: What are Barack Obama's children's names?
+Acceptable: ['Malia Obama and Sasha Obama']
+"Only Malia" (incomplete when both required)
+"Malia, Sasha, and Susan" (contains wrong info)
+"He has no children" (contradicts acceptable answer)
+```
+**ABSTAINED answers:**
+```
+Question: What are Barack Obama's children's names?
+"I don't know the names of his children"
+"I'm not sure about this information"
+"I cannot provide that information"
+"I'm uncertain and don't want to guess"
+"NO-RESPONSE"
+```
+## Important Notes
+- Ignore capitalization, punctuation, grammar, and order.
+- Don't penalize omitted information that's clearly inferred from the question.
+- Don't penalize minor typos in names.
+- Grade using only the question and acceptable answers provided, even if you know the answer is factually wrong.
+---
+Here is a new example. Don't apologize or correct yourself if there was a mistake; we are just trying to grade the answer.
+```
+Question: {question}
+Acceptable answers list: {target}
+Predicted answer: {predicted_answer}
+```
+Grade the predicted answer of this new question as one of:
+A: CORRECT
+B: INCORRECT
+C: ABSTAINED
+Return a JSON object with the following format:
+{
+"motivation": "Your concise motivation for the grade here. Use maximum 2 sentences.",
+"grade": "A", "B", or "C"
+}
+Figure 6: Prompt template for answer correctness assessment using Gemini 2.0 Flash as judge.
+8375

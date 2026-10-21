@@ -1,0 +1,769 @@
+
+
+========== PDF PAGE 1 / 11 ==========
+         FlowRAG:ContinualLearningforDynamicRetrieverin
+                                    Retrieval-AugmentedGeneration
+                 Senlei Zhang*                                       Tongjun Shi                                       Dandan Song
+    Huazhong University of Science and                          Futu Holdings Limited                         Beijing Institute of Technology
+                    Technology                                      Shenzhen, China                                     Beijing, China
+                  Wuhan, China                               tongjunshihhh@gmail.com                                   sdd@bit.edu.cn
+           m202574111@hust.edu.cn
+                  Luan Zhang                                      Shuhao Zhang*†                                       Xiaofei Liao*
+        Beijing Institute of Technology                Huazhong University of Science and                 Huazhong University of Science and
+                  Beijing, China                                       Technology                                         Technology
+              zl005888@163.com                                       Wuhan, China                                       Wuhan, China
+                                                             shuhao_zhang@hust.edu.cn                                xfliao@hust.edu.cn
+                                                                        Hai Jin*
+                                                       Huazhong University of Science and
+                                                                       Technology
+                                                                     Wuhan, China
+                                                                   hjin@hust.edu.cn
+Abstract                                                                          CCS Concepts
+Retrieval-AugmentedGeneration(RAG) enhancesLargeLanguage                          •Information systems→Retrieval models and ranking.
+Models(LLMs)by leveragingexternal knowledge, where retrieval
+accuracydirectlyaffectsgenerationquality.However,denseretriev-                    Keywords
+ers, commonly employed in RAG, suffer degraded performance in                     Retrieval-AugmentedGeneration,ContinualLearning,LargeLan-
+evolving corpora where new documents arrive continuously and                      guage Model
+distributionshiftsaccumulateovertime.Insuchsettings,continually
+updatingretrieversiscrucial,yetconventionalretrainingiscomputa-                   ACM Reference Format:
+tionallyexpensiveandoftenimpractical.Toaddressthischallenge,                      Senlei Zhang, Tongjun Shi, Dandan Song, Luan Zhang, Shuhao Zhang,
+weproposeFlowRAG,alightweightandeffectivemethodforcon-                            XiaofeiLiao,andHaiJin.2026.FlowRAG:ContinualLearningforDynamic
+tinual retriever adaptation in evolving corpora. FlowRAG augments                 Retriever in Retrieval-Augmented Generation . InProceedingsoftheACM
+the encoder with Layer-wise Prompt Embeddings and introduces                     WebConference2026(WWW’26),April13–17,2026,Dubai,UnitedArab
+aCross-LayerFusionmechanismtocapturehierarchicalsemantic                          Emirates.ACM, New York, NY, USA, 11 pages. https://doi.org/10.1145/
+representations. In addition, a novel Generator-Guided Loss aligns                3774904.3792361
+retriever scores and intermediate representations with the LLM’s
+generationlikelihoods,encouragingretrievaldecisionsthatareboth                    1    Introduction
+semanticallyrelevantandbeneficialforgeneration.Experimentson                      Retrieval-Augmented Generation(RAG) has become a widely ac-
+datasets spanning four domains demonstrate that FlowRAG, which                    cepted approach to enhance the performance oflarge language
+updates only about 0.64% of the total model parameters, consis-                   models(LLMs)[           37,38],facilitatingtheirabilitytoretrieveandin-
+tently outperforms strong baselines in retrieval accuracy, generation             tegrateinformationfromtheweb(suchasWikipedia[34])orother
+quality,androbustnesstoforgettinginnon-stationarysettings.We                      externalknowledgebases[5,43].By retrieving relevantdocuments,
+release the code at https://github.com/CGCL-codes/FlowRAG.git.                    RAGbridgesthegapbetweenthestaticknowledgeencodedinLLM
+                                                                                  parameters and the dynamic, continuously evolving real world. This
+*AlsowithNationalEngineeringResearchCenterforBigDataTechnologyandSystem,          capabilityallowsLLMsto leverage up-to-dateanddomain-specific
+Service Computing Technology and System Lab, Cluster and Grid Computing Lab,      information without the need for extensive retraining [17, 25, 32].
+School of Computer Science and Technology.
+† Shuhao Zhang is the corresponding author (shuhao_zhang@hust.edu.cn).            Aspointedoutby previous studies [11,16,40],theeffectivenessof
+                                                                                  retrievalaugmentationstronglydependsonthequalityandrelevance
+                                                                                  ofthe retrievedcontent, which iscommonly achievedusingdense
+                                                                                  retrievers [5].
+This work islicensed undera CreativeCommons Attribution4.0 InternationalLicense.     Denseretrieversencodequeriesanddocumentsintocontinuous
+WWW’26,Dubai,UnitedArabEmirates.                                                  semantic vectors, enabling similarity-based retrieval that captures
+© 2026 Copyright held by the owner/author(s).                                     conceptualrelevancebeyondexact lexicaloverlap[5,9,12].While
+ACM ISBN 979-8-4007-2307-0/2026/04
+https://doi.org/10.1145/3774904.3792361                                           this approach is highly effective on static document collections, it
+
+========== PDF PAGE 2 / 11 ==========
+WWW ’26, April 13–17, 2026, Dubai, United Arab Emirates.                                                                                                                                               Senlei Zhang et al.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure1:CatastrophicforgettingofrepresentativeLLM-guidedretrievertrainingmethods(REPLUG[28],End2EndRAG[30],and
+Atlas [11]) under continual learning across multiple domains
+
+
+faces significant challenges in real-world applications, where doc-                    the effectiveness of layer-wise prompt embeddings, we introduce
+ument corpora are continuously evolving due to technological ad-                       a Cross-Layer Fusion mechanism. This fusion enables the model
+vancements, societal changes, and the emergence of new topics.                         to blend multiple levels of representation, ensuring a more com-
+Distribution shifts across domains often cause significant perfor-                     prehensive understanding of the evolving context and improving
+mance degradation and catastrophic forgetting of previously learned                    retrieval accuracy. (3)Generator-Guided Loss: To align retrieval
+knowledge [4], underscoring the need for continual learning for                        decisions with LLM’s generation likelihoods, we propose a novel
+retrievers.                                                                            Generator-Guided Loss. This loss function optimizes the retriever’s
+   Existing approaches to continual learning for retriever, such as                    scoresandintermediaterepresentationstoensuretheyarenotonly
+L2R [2], mainly target dense retriever fine-tuning for first-stage                     semanticallyrelevantbutalsoconducivetohigh-qualitygeneration.
+retrieval.However,theiroptimizationistailoredforstandalonere-                          This process directly encourages retrieval choices that support more
+trievalrather than retrieval forgeneration, which limitstheir appli-                   coherent and contextually appropriate generation outputs.
+cability in RAG systems. To overcome this limitation, LLM-guided                           In summary, our contributions are as follows:
+retriever training [11, 28, 30] has recently emerged as a promising                    •We present FlowRAG, the first method to integrate layer-wise
+paradigm, where generation likelihoods are leveraged to provide                           prompt embeddings into RAG retrievers for dynamic adaptivity
+implicitsupervisionforretrieval.Thisparadigmofferstwokeyad-                               and continual learning.
+vantages:(1)itleverageslargelanguagemodelstoprovidescalable                            •We propose the innovative Cross-Layer Fusion mechanism and
+supervision, thereby reducing the reliance on costly human anno-                          a Generator-Guided Loss to not only enhance the retriever’s rep-
+tations; and (2) it naturally aligns retrievers with downstream gen-                      resentational capacity but also align retrieval choices with the
+erationtasks,ensuringthatretrievedinformationdirectlyenhances                             generationprocess,ensuringmorecontextuallyrelevantandco-
+generation quality. Despite these benefits, applying LLM-guided                           herent outputs.
+retrievertrainingin acontinuallearningsettingstillencountersthe                        •The experimental results across four distinct domains demon-
+challenge of catastrophic forgetting.                                                     strate that FlowRAG consistently outperforms strong baselines
+   To better understandthe constraints,we conducted apreliminary                          in terms of retrieval accuracy, generation quality, and resilience
+studyoncurrentrepresentativeLLM-guidedretrievertrainingmeth-                              tocatastrophicforgetting.FurtheranalysisrevealsthatFlowRAG
+ods, including REPLUG [28], End2EndRAG [30], and Atlas [11].                              maintains high efficiency, requiring only approximately 0.64%
+We sequentially trained the retriever across multiple domains. As                         of the total model parameters to be updated in non-stationary
+shown in Figure 1, the performance of all models exhibited a clear                        settings. This efficiency underscores FlowRAG’s potential as a
+degradationwhen shiftingtonew domains.Forexample, REPLUG                                  robust solution for dynamic and continual learning.
+achievedan initialF1of 33.22%on ConvQAbutdropped to8.79%
+aftertrainingonsubsequentdatasets.Similardeclineswereobserved                          2    Related Work
+forEnd2EndRAGandAtlas.Theseresultsdemonstratethatexisting                              RAG Retriever Fine-tuning.Large language models have demon-
+methodsareunabletoretainpreviouslyacquiredknowledge,leading                            strated limitations in effectively leveraging context [20, 39]. Sev-
+to catastrophic forgetting in evolving corpora.                                        eral studies have explored improving the performance ofRetrieval-
+   Toaddressthischallenge,weproposeFlowRAG,alightweight                                AugmentedGeneration(RAG) systems through retriever fine-tuning.
+and effective method of continual learning for the retriever in evolv-                 Recent efforts have aligned retriever training with generation ob-
+ingcorpora.FlowRAGconsistsofthreekeycomponents:(1)Layer-                               jectives to enhance the overall RAG pipeline. Early methods such
+wisePromptEmbeddings:Buildingoninsightsfromourprelim-                                  as Distill-RAG [10] and End2EndRAG [30] jointly optimize the
+inary results, we enhance the retriever’s encoder by introducing                       retrieverand generator by propagating the generationloss through
+layer-wisepromptembeddings.By incorporatingtheseembeddings,                            cross-attention layers, thereby enabling retrieval decisions that di-
+the retriever can preserve previously learned knowledge and miti-                      rectlybenefit downstreamgeneration. However, suchjoint training
+gate catastrophic forgetting. (2)Cross-Layer Fusion: To enhance                        can be computationally expensive and sensitive to corpus shifts.
+
+========== PDF PAGE 3 / 11 ==========
+FlowRAG: Continual Learning for Dynamic Retriever in Retrieval-Augmented Generation                          WWW ’26, April 13–17, 2026, Dubai, United Arab Emirates.
+
+   To mitigate computational overhead, recent methods decouple                        4    Methodology
+retrieveroptimizationbyleveragingthelanguagemodelasasupervi-                          To address the challenges ofadapting RAG systemsto continually
+sorysignal.REPLUG[28]proposesLM-SupervisedRetrieval(LSR),                             evolving document corpora, we propose FlowRAG, a framework
+whichaligns retriever scorestothe languagemodel’s preferencedis-                      thatintegratespromptembedding,cross-layerfusion,andgenerator-
+tributionusingaKLdivergenceloss.RA-DIT[19]adoptsthesame                               guidedsupervision.AsillustratedinFigure2,ourapproachenhances
+LSR objective to update the retriever without manual annotations.                     traditional RAG pipelines in threemain aspects: (1)Prompt Tuning
+Similarly,Atlas[11]appliesaPerplexityDistillationlossthattrains                       (§4.1),where weinsert task-specificprompt embeddings intomulti-
+the retriever to approximate the language model’s preference distri-                  ple encoder layers to efficiently adapt to domain shifts; (2) Cross-
+butionoverdocumentsbyassessingtheirimpactonperplexity,also                            LayerFusion(§4.2),whichemploysadistribution-awareattention
+using KL divergence.                                                                  mechanism,StateFusion, torecursively aggregate prompt-enhanced
+Continual Learning.Continual Learning(CL) [               3, 33] has been             representationsacross layers,enablingrichercontextualmodeling;
+widely studied as a solution to catastrophic forgetting, the phenome-                 and (3) Generator-Guided Loss (§4.3), which aligns retrieval and
+nonwheremodelsoverwritepreviouslyacquiredknowledgewhen                                state-level distributions with generation-guided signals through KL-
+exposed to new tasks or domains [18]. Existing CL approaches are                      divergence based objectives. Together, these components provide a
+commonly categorized into three families: replay-based methods,                       more efficient and robust adaptation strategy for RAG, mitigating
+whichpreserveasubsetofoldsamplesandmixthemwithnewdata                                 catastrophicforgettingwhilemaintaining strong performanceacross
+during training [24, 42]; regularization-based methods, which pe-                     dynamic domains.
+nalize updates to parameters deemed critical for past tasks [13, 41];
+andparameter-isolationmethods,whichallocatetask-specificsub-                          4.1    Prompt Tuning
+networks or modules to mitigate interference [1]. These approaches                    Toadapttodomain-specificdocumentcollections𝐷𝑡attimestamp𝑡,
+haveachievednotablesuccessincomputer vision[22,26,27]and                              we follow [21] to insert trainable prompt embeddings into multiple
+natural language processing [1, 7], establishing CL as a central                      layersoftheencoder.Wedescribethemodel’soperationintheorder
+paradigm for learning in non-stationary environments.                                 of forward propagation. Specifically, for each transformer layer𝑗,
+   Despite advancements in CL, its application to RAG remains                         wemodifytheself-attentioncomputationbyprependingtheprompt
+underexplored.Existingworkfocusesmainlyoncontinuousdense                              embeddingsexclusively tothekeyandvaluesequences,while the
+retrievers [2], which are optimized for standalone retrieval rather                   query input remains unchanged.
+than retrieval for generation. This narrow focus limits the flexibility                  Formally,let𝐻(𝑗−1) ∈R 𝐵×𝑇×𝐷        denote the hiddenstates from the
+needed for independent adaptation. In practical scenarios, document                   (𝑗−1)    -thlayer,andlet𝑃𝑡,𝑗∈R 𝐵×𝑝×𝐷        denotethepromptembeddings
+corporaevolvecontinuously,introducingdistributionshiftsthatex-                        specific to task𝑡at layer𝑗, where𝐵 is the batch size,𝑇 is the
+acerbate forgetting in static retrieval models. While methods like                    sequencelength,𝐷 isthehiddensize,and𝑝isthenumberofprompt
+SelfAug [8] addressforgetting inthe LLMcomponent, wefocus on                          tokens. Then, the input to the self-attention module at the𝑗-th layer
+the retriever component, which has been less explored. Our work                       is defined as:
+complementsexistingmethodsbytargetingadifferentaspectofthe
+continuous learning challenges of RAG.                                                                         𝑄(𝑗) =𝑊 𝑄𝐻(𝑗−1)
+3    Task Formulation                                                                                          𝐾(𝑗) =𝑊 𝐾[𝑃𝑡,𝑗;𝐻(𝑗−1)]                            (3)
+We consider a RAG setting where the external document corpus                                                   𝑉(𝑗) =𝑊 𝑉[𝑃𝑡,𝑗;𝐻(𝑗−1)],
+evolvesover time.Let{D1,D2,...,D𝑇}denote asequence ofcor-                             where[·;·]denotes concatenation along the sequence length di-
+pora, where eachD𝑡={𝑑 𝑡1,𝑑𝑡2,...,𝑑𝑡𝑛𝑡}represents the set of docu-                     mension, and𝑊   𝑄,𝑊𝐾,𝑊𝑉 are standard linear projections.
+ments available at time step𝑡. At each time step𝑡, the input to the
+system consists of queriesQ     𝑡and corresponding answersY      𝑡.                   4.2    Cross-Layer Fusion
+   For a given query𝑞𝑡𝑖∈Q𝑡, the retriever selects the top-𝑘rele-                      Although prompt tuning (Section 4.1) adapts the model by inde-
+vant documents fromD𝑡based ona similarityfunction computed                            pendently inserting prompts𝑃𝑡,𝑗at each layer𝑗, this layer-wise
+between encoded representations:                                                      isolationlimitstheformationofhierarchicalsemanticunderstanding.
+              R𝑡𝑞𝑡𝑖 =TopK 𝑑𝑡𝑗∈D𝑡 sim(𝑓  𝑞(𝑞𝑡𝑖),𝑓𝑑(𝑑𝑡𝑗)),𝑘,             (1)           Drawing inspiration from methods like iVPT [44], which employ
+                                                                                      Cross-Layer Dynamic Connections(CDC) to enhance inter-layer
+   where𝑓𝑞(·)and𝑓𝑑(·)denotethequeryanddocumentencoders,re-                            information flow, we introduce Cross-Layer Fusion. Specifically,
+spectively.Thegenerator𝐺 thenproducestheanswer𝑎𝑡𝑖conditioned                          ourapproachleveragesStateFusion,adistribution-awareattention
+on the query and the retrieved context:                                               mechanism, to recursively integrate prompt-enhanced representa-
+                                                                                      tions from all layers into a single, context-aware embedding. This
+                             𝑎𝑡𝑖=𝐺(𝑞   𝑡𝑖,R𝑡𝑞𝑡𝑖).                                 (2) process unfolds through several key stages:
+                                                                                      Inner-LayerFusion.To implement inner-layerfusion, we designa
+Thiscontinuallearning scenariointroducesconsiderablechallenges:                       mechanism calledStateFusion, which refines standard self-attention
+asthedocumentdistributionevolves,theRAGsystemmustadaptto                              by incorporating global statistical properties of the input, specifi-
+newdomainswhilemaintainingaccuracyonpreviouslyencountered                             cally the mean and standard deviation computed along the sequence
+data.                                                                                 dimension.Foragivenlayer𝑗,withhiddenstates𝐻(𝑗−1) ∈R 𝐵×𝑇×𝐷
+
+========== PDF PAGE 4 / 11 ==========
+WWW ’26, April 13–17, 2026, Dubai, United Arab Emirates.                                                                                                                                               Senlei Zhang et al.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure2:TheoverallframeworkofFlowRAG.Fordocumentcollections𝐷𝑡attimestamp𝑡,FlowRAGinsertspromptembeddingsinto
+multiple layers of the retriever to efficiently adapt to domain shifts, applies cross-layer fusion for richer contextual modeling, and
+leverages generator-guided loss to align retrieval and state-level distributions with generation-guided signals.
+
+
+Algorithm 1StateFusion Mechanism                                                        aggregated state𝑆. Thisstate𝑆is thenfused with the current Layer
+   Input:Hidden states    𝐻(𝑗−1) ∈R 𝐵×𝑇×𝐷       , prompt slice𝑃𝑡,𝑗∈                     State𝐿𝑗usingStateFusion,whichproduces anupdatedAggregated
+   R𝐵×𝑝×𝐷                                                                               State𝐴𝑗. Such recursive fusion enriches contextual representations
+   Output:Fused output𝑂                                                                 by facilitating inter-layer information exchange. For the initial layer
+   𝜇ℎ←MEAN(𝐻    (𝑗−1)), 𝜎ℎ←STD(𝐻   (𝑗−1))                                               where aprompt isinserted,𝐴𝑗isformed from𝐿𝑗directly, without
+   𝜇𝑝←MEAN(𝑃     𝑡,𝑗), 𝜎𝑝←STD(𝑃    𝑡,𝑗)                                                 prioraggregation.Algorithm2detailsthiscross-layerfusionprocess.
+  𝑄←𝑊   𝑄𝐻(𝑗−1) , 𝐾←𝑊  𝐾𝑃𝑡,𝑗, 𝑉←𝑊  𝑉𝑃𝑡,𝑗                                                Algorithm 2Cross-Layer Fusion Mechanism
+  𝑄←CONCAT(𝑄,𝜇     ℎ,𝜎ℎ)
+   𝐾←CONCAT(𝐾,𝜇     𝑝,𝜎𝑝)                                                                  Input:Hidden states    𝐻(𝑗−1) ∈R 𝐵×𝑇×𝐷       , prompt slice𝑃𝑡,𝑗∈
+  𝑉←CONCAT(𝑉,𝜇    𝑝,𝜎𝑝)                                                                    R𝐵×𝑝×𝐷
+   C←SOFTMAX(𝑄𝐾    ⊤/√𝐷)·𝑉                                                                 Output:Aggregated state𝐴          𝑗, layer state𝐿   𝑗
+  𝑂←ATTNOUT(C)                                                                             𝐿𝑗←STATEFUSION(𝐻    (𝑗−1) ,𝑃𝑡,𝑗)              ⊲See Algorithm 1
+   return𝑂                                                                                 Append𝐿      𝑗toPreLayerStates
+                                                                                           if𝑗>1then
+                                                                                                P←STACK(PreLayerStates)
+and prompt embeddings𝑃𝑡,𝑗∈R 𝐵×𝑝×𝐷       , their respective means                                S←MEAN(P,dim=1)
+(𝜇ℎ,𝜎ℎ)and standard deviations(𝜇𝑝,𝜎𝑝)are calculated. These sta-                                𝐴𝑗←STATEFUSION(S,𝐿       𝑗)
+tisticsare thenconcatenatedwith thequery (𝑄),key (𝐾),and value                                  ifj is the last prompt-inserted indexthen
+(𝑉) projections priorto the attention computation. The resultantat-                                 Set𝐴  𝑗as aggregated query𝑞    𝑠or doc state𝑑   𝑠
+tention output is subsequently processed through a self-output layer,                           end if
+yielding the Single Layer State. Algorithm 1 details this inner-layer                      else
+fusion process.                                                                                𝐴𝑗←None
+Cross-Layer Fusion.To integrate enhanced prompt information                                end if
+across different layers, the Layer States of all preceding prompt                          return𝐴 𝑗,𝐿𝑗
+insertionlayersarerecursivelyaggregated.Specifically,atlayer𝑗,
+the mean of all previously computed Layer States, stored in the                         AggregatedState.Tofurther enhancecontextual modeling,the Ag-
+queuePreLayerStates, is calculated to derive an intermediate                            gregatedState𝐴𝑗isprependedtothekeyandvaluesequenceswithin
+
+========== PDF PAGE 5 / 11 ==========
+FlowRAG: Continual Learning for Dynamic Retriever in Retrieval-Augmented Generation                          WWW ’26, April 13–17, 2026, Dubai, United Arab Emirates.
+
+the self-attention mechanism, alongside the prompt embeddings.                          the generation-informed distribution𝑄           LM:
+This modifies the standard attention input projections as follows:                                                ∑︁
+                                                                                                   LstateKL  =    1|𝐵|KL(𝑃𝑆(𝑑𝑖|𝑞)∥𝑄  LM(𝑑𝑖|𝑞,𝑦)).       (9)
+                       𝑄(𝑗) =𝑊 𝑄𝐻(𝑗−1)                                                                            𝑥∈𝐵
+                       𝐾(𝑗) =𝑊 𝐾[𝐴𝑗;𝑃𝑡,𝑗;𝐻(𝑗−1)]                             (4)        Total Loss.The final training objective jointly considers both the
+                       𝑉(𝑗) =𝑊 𝑉[𝐴𝑗;𝑃𝑡,𝑗;𝐻(𝑗−1)].                                       retrieval likelihood loss and the aggregated state loss. To balance
+                                                                                        theirrelativecontributions,weintroduceaweightinghyperparameter
+This update enables the model to attend not only to the prompt                          𝜆on the state-level term:
+and hidden states within the current layer but also to the fused                                               Ltotal =L  retrievalKL +𝜆·LstateKL.                     (10)
+representations accumulated from previous layers.                                       Here,Lretrieval
+   At the final prompt insertion layer: if the encoder is the query                     generation-informed signals, whileLstateKL       ensures that the retriever distribution aligns with
+encoder,𝐴 isassignedasthequerystate𝑞𝑠;conversely,itisassigned                           internal representations through state-level alignment. The hyper-KL   further regularizes the
+as the document state𝑑   𝑠.                                                             parameter𝜆 provides flexibility in adjusting the strength of this
+4.3    Generator-Guided Loss                                                            regularization.
+This section introduces the Generator-Guided Loss, which aligns                         5    Experiment Setup
+retrievalandstate-leveldistributionswithgenerationsignalstoim-
+prove RAG performance. We propose two losses: Retrieval Likeli-                         5.1    Datasets
+hoodLoss,whichfavorsdocumentsusefulforgeneration,andAg-                                 We evaluate our model on the following datasets:
+gregated State Loss, which aligns internal representations through                      •CovidQA[           30]: Derived from CORD-19 [35], it contains 250,000
+cross-layer fusion.                                                                        100-wordpassagesfrom5,000papers(excludingabstracts),with
+RetrievalLikelihoodLoss.Following[        29],weconstructageneration-                      225,000 synthetic QA pairs (90% training, 10% validation) and
+aware retrieval distribution by leveraging the likelihood of gener-                        2,000 human-annotated test pairs [23].
+ating the answer given each retrieved document. Given a query                           •NewsQA[               30]: Based on the NewsQA corpus [31], it includes
+𝑞, its corresponding answer𝑦, and the top𝑛retrieved documents                              85,000 100-word passages from 10,000 articles, with 100,000
+𝐷′={𝑑     1,𝑑2,...,𝑑𝑛}, the LLM-based distribution is defined as:                          human-annotated QA pairs (90,000 training, 5,000 validation,
+          𝑄LM(𝑑𝑖|𝑞,𝑦)=          exp(PLM(𝑦|𝑑     𝑖,𝑞)/𝛽)                                    5,000 test) from CNN/DailyMail [6].
+                               Í                                                        •ConvQA[        30]: Built from QAConv [36], it comprises 110,000
+                                 𝑑𝑗∈𝐷′exp PLM(𝑦|𝑑      𝑗,𝑞)/𝛽,       (5)                  100-word passages from 10,000 conversations, each prefixed with
+wherePLM(𝑦|𝑑     𝑖,𝑞)denotesthelogarithmicprobabilityofgener-                              ID and speaker, with 35,000 QA pairs (25,000 training, 5,000
+ating the answer𝑦conditioned on the document𝑑𝑖and the query                                validation, 5,000 test).
+𝑞, with𝛽 serving as a temperature hyperparameter to adjust the                          •NQ[     14]: It contains 307,000 training QA pairs, 7,800 validation
+sharpness of the distribution.                                                             pairs, and 7,800 test pairs from Wikipedia and the web.
+   Meanwhile, the retriever produces its own distribution over the
+same set𝐷 ′based on similarity scoressim(𝑑        𝑖,𝑞):                                 5.2    Baselines
+                𝑃𝑅(𝑑𝑖|𝑞)=            exp(sim(𝑑   𝑖,𝑞)/𝛽)Í                               We compare our proposed model with several representative base-
+                                  𝑑𝑗∈𝐷′exp(sim(𝑑   𝑖,𝑞)/𝛽),              (6)            lines,allofwhichusethesamebackboneretriever,Contriever[9],
+where𝛽 is a temperature parameter. We minimize the Kullback-                            asthe standarddense retriever inoursetting. Forthe RAGtasks, we
+Leibler (KL) divergence between𝑃𝑅 and the LLM-derived distri-                           employQwen2.5[38]andChatQA2[37],aLlama3.0-basedmodel.
+bution𝑄LM, encouraging the retriever to favor documents that are                        In this study, we focus on training the retriever while keeping the
+more helpful for generation:                                                            generatorfrozen.Duringevaluation,weusethevllmframework[15]
+                                                                                        to accelerate inference.
+                           ∑︁                                                              Wecompareourmethodswiththefollowingbaselines.(1)Con-
+         LretrievalKL     =    1|𝐵|KL(𝑃𝑅(𝑑𝑖|𝑞)∥𝑄  LM(𝑑𝑖|𝑞,𝑦)),     (7)                  triever [9]: Astrong unsupervised dense retriever trained onlarge-
+                           𝑥∈𝐵                                                          scalecorpora. Itservesas thestandardRAGbaselineand represents
+where𝐵denotes the training batch.                                                       the performance of static retrievers without online adaptation. (2)
+Aggregated State Loss.To further align internal representations,                        Atlas [11]: It applies a Perplexity Distillation loss that trains the
+we introducea state-levelloss based onCross-Layer Fusion outputs                        retrieverto approximatethe languagemodel’s preferencedistribu-
+(see Algorithm 2). For each query-document pair(𝑞,𝑑𝑖), we extract                       tion over documents by assessing their impact on perplexity, also
+thefusedquerystate𝑞𝑠anddocumentstate𝑑𝑠𝑖.Basedonsimilarity                               using KL divergence. (3) End2EndRAG [30]: An end-to-endframe-
+scoressim(𝑑        𝑠𝑖,𝑞), we generate aggregated statescores:                           work that jointly optimizes the retriever and generator, providing
+                                                                                        a more integrated retrieval-augmented generation system. (4) RE-
+               𝑃𝑆(𝑑𝑖|𝑞)=            exp(sim(𝑑   𝑠𝑖,𝑞𝑠)/𝛾)Í                              PLUG[28]:Treatsthelanguagemodelasablackbox,augmentingit
+                                 𝑑𝑗∈𝐷′exp(sim(𝑑   𝑠𝑖,𝑞𝑠)/𝛾).             (8)            withatunableretrieverthatprependsretrieveddocuments,allowing
+Similar to the likelihood-based loss, we minimize the Kullback-                         the model to indirectly supervise retrieval. (5) L2R [2]: A lifelong
+Leibler (KL) divergence between the state-based distribution𝑃𝑆and                       learning approach for first-stage retrieval that maintains a memory
+
+========== PDF PAGE 6 / 11 ==========
+                   WWW ’26, April 13–17, 2026, Dubai, United Arab Emirates.                                                                                                                                               Senlei Zhang et al.
+
+                   Table1:ComparisonofmethodsacrossfourQAdatasetsunderthreesequentialtrainingorders.WereportboththefinalRetrieval
+                   ACC@5 (%) and F1 scores (%) on each dataset after sequential training, along with the averaged performance (AVE.) and the
+                   forgetting measure (Forget). We highlight the best results for each metric in bold.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                    Table 2: Parameter efficiency comparison                                                        Forgetting Score.To quantify catastrophic forgetting, we define
+                                                                                                                                the forgetting score for each intermediate task𝐷   𝑖(𝑖<𝑇) as:
+                            Method                  # Trainable Params    Percentage                                                                 Forget𝐷𝑖  =max𝑡≤𝑇    F1𝑡(𝐷𝑖)−F1𝑇(𝐷𝑖),             (11)
+                            Fine-tuning                        110M                     100%                                    where F1𝑡(𝐷𝑖)denotes the F1 on𝐷𝑖after training on task𝑡. The
+                            FlowRAG (ours)      0.63M                   0.64%                                                   total forgetting is then the average over all tasks except the last:
+
+
+                                                                                                                                                                                           𝑇−1∑︁
+                   bufferofsupportnegativesandincorporatesadiversenegativeselec-                                                                    TotalForgetting=                       1𝑇−1  Forget𝐷𝑖.            (12)
+                                                                                                                                                                                            𝑖=1
+                   tion strategy and ranking alignment objective, avoiding costly index                                         A lower total forgetting score indicates better retention of earlier
+                   rebuilding.                                                                                                  tasks.
+
+                   5.3    Evaluation Metrics                                                                                    6    Experimental Evaluation
+                   We evaluate our models using three complementary metrics: Top-𝑘
+                   retrieval accuracy, average F1, and forgetting score.                                                        6.1    Evaluation Framework
+                       Top-𝑘Retrieval Accuracy.Following[ 30],weevaluatethe ef-                                                 Toevaluatethecontinuallearningcapabilityofourproposedmethod
+                   fectivenessoftheretrieverusingtheTop-𝑘retrievalaccuracy.Specif-                                              and baselines, we adopt a sequential training and evaluation frame-
+                   ically,thismetriccheckswhethertheground-truthanswerappearsin                                                 work across four datasets:CovidQA,NewsQA,ConvQA, and NQ.
+                   anyofthetop𝑘retrievedpassages.Inourexperiments,weset𝑘=5    .                                                 This setting simulates a realistic scenario where tasks arrive incre-
+     Reader         TrainOrder       Methods           CovidQA            NewsQA            ConvQA                NQ                       AVE.                      ForgetFor brevity, we denote the Top-5 retrieval accuracy asACC@5inmentally, requiring the retriever to adapt to new domains while
+                   all result tables.                        ACC@5     F1     ACC@5     F1     ACC@5     F1     ACC@5     F1      ACC@5         F1        ACC@5     F1preserving knowledge from previous tasks.
+                       F1 Score.The F1 score is calculated as the harmonic mean ofContriever         6.80      13.80     23.53     10.47     44.34     19.86     34.02     27.71      27.17          17.96           /            /We consider three training orders by randomly permuting the
+                   precision and recall at the token level.REPLUG         3.40      7.85      11.21      4.96      32.45     25.12     56.78     41.20      25.96          19.78        13.43      13.99datasets:
+                       We presentthe mean F1 score across alltest sets following train-Order1End2EndRAG       3.57      7.98      13.89      6.99      34.82     25.25     56.12     40.26      27.10          20.12        13.12      14.36(1) CovidQA→NewsQA→ConvQA→NQ
+                   ing on the final task𝑇.    Atlas            2.36      5.17      12.52      8.80      28.22     22.72     52.21     38.41      23.83          18.78        12.83      12.53(2) CovidQA→NQ→NewsQA→CovidQA
+                                               L2R             4.59      10.29     21.39     13.92     40.03     34.00     54.79     41.40      30.20          24.90         6.57       6.57
+Qwen2.5-7B[38]                              REPLUG         4.96      9.59      22.42     13.25     46.75     39.91     24.22     21.90      24.59          21.16        15.95      12.56
+                         Order2          End2EndRAG       2.37      7.77      22.30     13.34     45.58     39.14     28.18     19.87      24.61          20.03        10.06      13.92
+                                              Atlas            0.28      7.30      23.51     12.71     41.22     36.17     21.75     22.73      21.69          19.73        17.69      13.40
+                                               L2R             4.65      10.62     28.16     19.60     44.18     38.74     38.79     30.75      28.95          24.93         9.52       6.83
+                                            REPLUG         3.23      7.87      23.05     14.90     16.39      9.71      55.06     40.15      24.43          18.16        14.44      15.81
+                         Order3          End2EndRAG       3.46      7.60      19.50     15.01     12.27      6.1456.3840.61      22.90          17.34        16.33      16.44
+                                              Atlas            4.42      5.66      24.99     12.87     12.27      5.24      43.85     38.03      21.38          15.45        14.67      18.75
+                                               L2R             5.15      13.20     27.98     17.57     24.87     19.13     55.07     39.21      28.27          22.28         9.11       8.03
+                                        FlowRAG(ours)10.88     20.54     29.98     22.03     41.95     35.8953.2441.08   34.01(+3.81)29.89(+4.96)0(+9.11)0(+8.03)
+                                           Contriever         6.80      17.29     23.53     19.40     44.34     29.38     34.02     40.11      27.17          26.55           /            /
+                                            REPLUG         2.98      12.16     13.35     11.02     25.23     28.60     56.46     53.86      24.51          26.41        13.22      10.66
+                         Order1          End2EndRAG       3.00      11.33     11.15     12.74     27.72     25.02     54.89     50.87      24.19          24.99        15.98      9.44
+                                              Atlas            1.25      10.67     10.51      9.87      23.87     20.85     53.84     52.68      22.37          23.52        15.16      11.09
+                                               L2R             7.98      15.11     21.77     14.26     29.60     27.40     58.44     52.17      29.45          27.24         5.16       4.84
+Llama3-8B[37]                               REPLUG         1.97      10.31     17.03     15.95     39.79     33.88     21.52     28.56      20.08          22.18        18.99      11.13
+                         Order2          End2EndRAG       1.51      10.42     15.15     16.6345.7138.00     12.61     30.75      18.75          23.95        22.71      10.32
+                                              Atlas            2.53      12.97     16.99     16.70     44.66     36.67     17.86     26.70      20.51          23.26        21.09      11.42
+                                               L2R             6.15      16.98     27.85     22.03     43.70     37.80     39.84     35.84      29.39          28.16         8.57       3.85
+                                            REPLUG         3.55      12.96     10.45     10.78      9.54      9.79      50.39     42.63      18.48          19.04        15.84      13.29
+                         Order3          End2EndRAG       2.72      10.63     22.34     16.00     12.30     12.4355.2044.40      23.14          20.87        16.68      14.11
+                                              Atlas            4.95      14.92     19.70     15.24     14.48      9.46      53.7044.7223.21          21.09        15.42      13.74
+                                               L2R             7.92      18.48     24.15     20.71     24.44     23.74     56.29     43.13      28.20          26.52         7.16       5.25
+                                        FlowRAG(ours)12.34     22.92     32.36     24.2145.6937.3853.44     43.4935.96(+6.51)32.00(+3.84)0(+7.16)0(+5.25)
+
+========== PDF PAGE 7 / 11 ==========
+FlowRAG: Continual Learning for Dynamic Retriever in Retrieval-Augmented Generation                          WWW ’26, April 13–17, 2026, Dubai, United Arab Emirates.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure3:ComparisonofTop-kRetrievalAccuracy(ACC)andF1scoresacrossmultipledatasetsfortheTop-5(left),Top-10(middle),
+and Top-20 (right) retrieval settings
+
+
+   (3) ConvQA→CovidQA→NewsQA→NQ                                                       F1, respectively. These improvements are consistent across different
+   TrainingPhase.In eachphase, we sample1,000 QA pairs from                           trainingordersandgeneralizewelltoothermodels,suchasQwen2.5-
+the training set of each dataset (approximately 1.6%  – 20% of the                    7B.Thisdemonstrates thebroadapplicabilityandrobustnessof our
+dataset),simulatingacontinual-learningscenariowith𝑇 tasks.For                         method.
+all methods, we retrieve the top-5 documents per query to provide                        (2)Better Performance for Generation Tasks.While               L2R
+context to the generator; alternative choices are explored in Sec-                    performs well in sequential retrieval tasks, FlowRAG excels in
+tion 6.3.                                                                             generation tasks. This is reflected in the results, where FlowRAG
+   Baselines.For fine-tuning methods, we train the retriever with                     consistently outperforms L2R in both retrieval accuracy and F1
+AdamW, using a learning rate of 1×10 −5   and a warm-up ratio of                      scores across multiple datasets and training orders. For example,
+0.1. ForL2R, we follow the experimental setup from the original                       ontheLlamamodel,FlowRAGachievesa+6.51%improvementin
+paper [2].                                                                            ACC@5 and +4.96% improvement in F1 on the NQ dataset com-
+   Proposed method.We set the prompt length to 150 and insert                         pared to L2R.
+the prompts into encoder layers 1–7. The retriever is trained with                       (3)Reduced Forgetting.Sequential fine-tuning baselines ex-
+AdamW(learningrate5×10 −3  ,warm-upratio0.1).TheKL-divergence                         hibit substantialdegradation on earliertasks, and L2R only partially
+temperatureforretrieval-likelihoodalignmentis0.1,andforaggregated-                    mitigates this issue.In contrast,FlowRAG maintainsstable perfor-
+state alignment it is 1. We set𝛽=0.6in Eq. (10).                                      manceacrosstaskswithoutexplicitreplay.Byassigningtask-specific
+   Evaluation Phase.After training on each dataset (phase    𝑡), we                   prompt embeddings, FlowRAG preserves previously learned knowl-
+evaluate the model on the test sets of all previously seen datasets.                  edgeand avoids interferenceduring continualtraining.As aresult,
+This yields a𝑇×𝑇     matrix of Top-5 Retrieval ACC and F1 scores,                     it achieves strong retrieval accuracy and F1 across different training
+where𝑇is the number of tasks.                                                         orderswhileshowingnonoticeableforgetting,makingitwell-suited
+                                                                                      for continual retrieval on evolving corpora.
+6.2    Experimental Results and Analysis                                                 (4)ParameterEfficiency.Additionally,asshowninTable2,fine-
+Table1reportsthefinalresultsoneachdatasetaftersequentialtrain-                        tuningtheContrievermodel1 involvesupdatingall110Mparameters.
+ing.Detailedresultsonthechangesthroughouteverysequentialtrain-                        Incontrast,FlowRAGintroducessixlayersofpromptembeddings,
+ingstepcanbefoundinAppendixC.Overall,ourFlowRAGdemon-                                 eachwithalengthof150foratask,updatingonly0.63Mparameters.
+strates a significant advantage over all baseline methods across four                 Thisrepresentsjust0.64%ofthetotalmodelparameters,showcasing
+datasetsanddifferenttrainingorders,highlightingtheeffectiveness                       the parameter efficiency of our approach.
+of our approach. We make the following key observations:
+   (1)SuperiorPerformance.OurproposedFlowRAGconsistently                              6.3    Ablation Study
+outperformsexistingmethodsacrossarangeofdatasetsandtraining                           Table 3 presents an ablation study evaluating the contribution of
+orders.On theLlamamodel,FlowRAGachieves35.96%ACC@5                                    each component in our framework on two representative readers.
+and32.00% F1,outperformingL2Rby6.95%in ACC@5 and4.7%                                  Wecompare three variants:(1) w/Contriever, which usesa frozen
+in F1. In Orders 1, 2, and 3, FlowRAG surpasses L2R by 6.51%,
+6.57%, and 7.76% in ACC@5, and by 4.8%, 3.8%, and 5.5% in                             1https://huggingface.co/facebook/contriever
+
+========== PDF PAGE 8 / 11 ==========
+               WWW ’26, April 13–17, 2026, Dubai, United Arab Emirates.                                                                                                                                               Senlei Zhang et al.
+
+
+
+
+
+
+
+
+
+
+
+
+                                             Figure 4: Impact of insertion layer (left) and prompt length (right) on the performance
+
+                                        Table 3: Ablation results                                       otherwise stated, we vary the insertion layer with a fixed prompt
+                                                                                                        length of 150 tokens, and vary the prompt length with a fixed in-
+                                                                                                        sertion depth of 6. We also study the weighting parameter𝜆that
+                                                                                                        balances the two generator-guided loss terms in Section 4.3.
+                                                                                                            Insertion Layer.The left two plots in Figure 4 show that both
+                                                                                                        RetrievalACC@5andF1peakwheninsertingatlayers1–7(33.5%
+                                                                                                        and30.2%,respectively),whileperformancedropssharplyatdeeper
+                                                                                                        layers(8–9).Thissuggeststhattooshallowinsertionlimitscapacity,
+                                                                                                        whereasoverlydeepinsertionmayintroducenoiseanddilutesalient
+                                                                                                        information, degrading both retrieval and generation.
+                                                                                                            Prompt Length.The right two plots in Figure4 indicate a non-
+                                                                                                        monotonic effect of prompt length. Retrieval ACC@5 is low with
+                                                                                                        very short prompts, peaks at 150 tokens (32.5%), and then declines.
+                                                                                                        F1 exhibits a similar but milder trend, also performing best at 150
+                                                                                                        tokens(29.7%).Theseresultssuggestthatadequatecontextisbene-
+                                                                                                        ficial, but overly long prompts may introduce irrelevant details.
+                                                                                                            Loss Weighting.We further examine the balance between the
+                                                                                                        retrieval likelihood loss and the state prediction loss by setting
+               Figure 5: The impact of the hyperparameter𝜆. The left shows                                                     Ltotal =L  retrieval
+               the Retrieval ACC@5, and the right shows the F1 score.                                                                       KL +𝜆·LstateKL.
+
+                                                                                                        Figure 5 reports results on both Qwen2.5-7B and Llama3-8B across
+               retriever without optimization;(2) w/ Prompt + RLLoss, which                             different𝜆. When𝜆=0    , using only the retrieval loss yields sub-
+               applies prompt tuning with the Retrieval Likelihood loss to better                       optimal performance. Increasing𝜆improves both ACC@5 and F1,
+               align retrieval with generation; and(3) w/ Cross + ASLoss(Full),                         with the best results at𝜆=0.6       . Beyond this point, performance
+               whichfurtherintroducescross-layerfusionandtheAggregatedState                             degrades, suggesting that over-weighting the state loss can over-
+               loss.                                                                                    constrain the retriever and hurt factual document selection. Overall,
+                   Overall,addingprompttuningandRLLossconsistentlyimproves                              𝜆=0.6providesthe best trade-off.
+
+               overthefrozenretriever,withnotablegainsinF1,indicatingstronger                           7    Conclusion
+               retrieval–generation alignment. Our full model achieves the best
+               ACC@5andF1onbothQwen2.5-7BandLlama3-8B,validatingthe                                     In this paper, we presented FlowRAG, a lightweight and effective
+               effectivenessofcombiningarchitecturalfusionwithstate-aggregated                          approachforcontinualretrieveradaptationinRetrieval-Augmented
+               supervision.                                                                             Generation (RAG) withevolvingdocument collections.FlowRAG
+                   Figure 3 further compares FlowRAG with the Contriever base-                          introducesLayer-wisePromptEmbeddingsandaCrossLayerFu-
+               line across datasets under different retrieval depths (top-5/10/20).                     sion mechanism to capture hierarchical semantics, along with a
+               FlowRAG consistently outperforms the baseline, and the gap gen-                          Generator-Guided Loss that aligns retrieval with generation like-
+               erally widens as more documents are retrieved. For example, on                           lihoods. Experiments on dynamic retrieval benchmarks show that
+               NQ, ACC@5 increases from 34.02% to 53.44%, with further im-                              FlowRAGconsistentlyoutperformsstrongbaselinesinbothretrieval
+               provements at ACC@10 and ACC@20. Similar trends hold for F1,                             andgeneration,whilemitigatingcatastrophicforgetting.Ourmethod
+               demonstrating the robustness of FlowRAG under deeper retrieval.                          providesarobustandparameterefficientsolutionforadaptiveRAG.
+
+               6.4    Sensitivity Analysis                                                              7.1    Acknowledgments
+               Weconductasensitivityanalysisonthreehyperparametersthataf-                               ThisworkissupportedbyNationalKeyResearchandDevelopment
+               fectFlowRAG’sperformance:(1)thenumberofinsertionlayers,(2)                               Program of China (No.2023YFB4502300) and NSFC-RGC under
+               the input prompt length, and (3) the loss weighting factor. Unless                       Grant No.62461160333.
+
+
+
+
+
+
+
+Method                                              Qwen2.5-7B            Llama3-8B
+                                     ACC@5      F1      ACC@5      F1
+w/Contriever                                     27.17       17.96       27.17       26.55
+w/Prompt+RLLoss                          31.64       27.68       32.77       30.16
+w/Cross-LayerFusion+ASLoss34.01       29.89       35.96       32.00
+
+========== PDF PAGE 9 / 11 ==========
+FlowRAG: Continual Learning for Dynamic Retriever in Retrieval-Augmented Generation                          WWW ’26, April 13–17, 2026, Dubai, United Arab Emirates.
+
+References                                                                                                    ’20). Curran Associates Inc., Red Hook, NY, USA, Article 793, 16 pages.
+ [1]  RahafAljundi,PunarjayChakravarty,andTinneTuytelaars.2017. ExpertGate:                              [17]  Minghao Li, Yingxiu Zhao, Bowen Yu, Feifan Song, Hangyu Li, Haiyang Yu,
+      Lifelong Learning with a Network of Experts. InProceedingsofthe2017IEEE                                  Zhoujun Li, Fei Huang, and Yongbin Li. 2023.  API-Bank: A Comprehensive
+      Conference on Computer Vision and Pattern Recognition (CVPR). 7120–7129.                                 Benchmark for Tool-Augmented LLMs. arXiv:2304.08244 [cs.CL]  https://arxiv.
+      doi:10.1109/CVPR.2017.753                                                                                org/abs/2304.08244
+ [2]  YinqiongCai,KepingBi,YixingFan,JiafengGuo,WeiChen,andXueqiCheng.                                   [18]  Yayong Li, Peyman Moghadam, Can Peng, Nan Ye, and Piotr Koniusz. 2025.
+      2023. L2R:LifelongLearningforFirst-stageRetrievalwithBackward-Compatible                                 InductiveGraphFew-shotClassIncrementalLearning.InProceedingsoftheEigh-
+      Representations. InProceedingsofthe32ndACMInternationalConferenceon                                      teenthACMInternationalConferenceonWebSearchandDataMining(Hannover,
+      InformationandKnowledgeManagement. 183–192.                                                              Germany)(WSDM’25).AssociationforComputingMachinery,NewYork,NY,
+ [3]  ArslanChaudhry,PuneetK. Dokania,ThalaiyasingamAjanthan,and PhilipH.S.                                    USA, 466–474.  doi:10.1145/3701551.3703578
+      Torr.2018. RiemannianWalkforIncrementalLearning:UnderstandingForgetting                            [19]  XiVictoriaLin,XilunChen,MingdaChen,WeijiaShi,MariaLomeli,RichJames,
+      and Intransigence. InComputer Vision – ECCV 2018. Springer International                                 PedroRodriguez,JacobKahn,GergelySzilvasy,MikeLewis,LukeZettlemoyer,
+      Publishing, Cham, 556–572.                                                                               and Scott Yih. 2024.  RA-DIT: Retrieval-Augmented Dual Instruction Tuning.
+ [4]  JianguiChen,RuqingZhang,JiafengGuo,MaartendeRijke,WeiChen,Yixing                                         arXiv:2310.01352 [cs.CL]  https://arxiv.org/abs/2310.01352
+      Fan, and Xueqi Cheng. 2023.  Continual learning for generative retrieval over                      [20]  Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua,
+      dynamic corpora. InProceedingsofthe32ndACMInternationalConferenceon                                      FabioPetroni,andPercyLiang.2024. LostintheMiddle:HowLanguageModels
+      InformationandKnowledgeManagement. 306–315.                                                              UseLongContexts.TransactionsoftheAssociationforComputationalLinguistics
+ [5]  Wenqi Fan, Yujuan Ding, Liangbo Ning, Shijie Wang, Hengyun Li, Dawei Yin,                                12 (2024), 157–173. doi:10.1162/tacl_a_00638
+      Tat-Seng Chua, and Qing Li. 2024.  A survey on rag meeting llms: Towards                           [21]  XiaoLiu,KaixuanJi,YichengFu,ZhengxiaoDu,ZhilinYang,andJieTang.2021.
+      retrieval-augmented large language models. InProceedings of the 30th ACM                                 P-Tuning v2: Prompt Tuning Can Be Comparable to Fine-tuning Universally
+      SIGKDDConferenceonKnowledgeDiscoveryandDataMining. 6491–6501.                                            Across Scales and Tasks.CoRRabs/2110.07602 (2021).   arXiv:2110.07602
+ [6]  KarlMoritzHermann,TomášKoˇciský,EdwardGrefenstette,LasseEspeholt,Will                                    https://arxiv.org/abs/2110.07602
+      Kay, Mustafa Suleyman, and Phil Blunsom. 2015.  Teaching machines to read                          [22]  Zheda Mai, Ruiwen Li, Jihwan Jeong, David Quispe, Hyunwoo Kim, and Scott
+      andcomprehend.InProceedingsofthe29thInternationalConferenceonNeural                                      Sanner. 2022.  Online continual learning in image classification: An empirical
+      InformationProcessingSystems-Volume1(Montreal, Canada)(NIPS’15). MIT                                     survey.Neurocomputing469(2022),28–51. doi:10.1016/j.neucom.2021.10.021
+      Press, Cambridge, MA, USA, 1693–1701.                                                              [23]  Timo Möller, Anthony Reina, Raghavan Jayakumar, and Malte Pietsch. 2020.
+ [7]  Neil Houlsby, Andrei Giurgiu, Stanislaw Jastrzebski, Bruna Morrone, Quentin                              COVID-QA: A Question Answering Dataset for COVID-19. InProceedings of
+      De Laroussilhe, Andrea Gesmundo, Mona Attariyan, and Sylvain Gelly. 2019.                                the1stWorkshoponNLPforCOVID-19atACL2020,KarinVerspoor,KevinBre-
+      Parameter-EfficientTransferLearningforNLP.InProceedingsofthe36thInter-                                   tonnelCohen,MarkDredze,EmilioFerrara,JonathanMay,RobertMunro,Cecile
+      national Conference on Machine Learning (Proceedings of Machine Learning                                 Paris, and Byron Wallace (Eds.). Association for Computational Linguistics, On-
+      Research,Vol.97),KamalikaChaudhuriandRuslanSalakhutdinov(Eds.).PMLR,                                     line.  https://aclanthology.org/2020.nlpcovid19-acl.18/
+      2790–2799.  https://proceedings.mlr.press/v97/houlsby19a.html                                      [24]  AlexanderPluska,PascalWelke,ThomasGärtner,andSagarMalhotra.2024. Log-
+ [8]  Yuqing Huang, Rongyang Zhang, Qimeng Wang, Chengqiang Lu, Yan Gao,                                       ical distillation of graphneural networks.InProceedingsofthe21stInternational
+      Yi Wu, Yao Hu, Xuyang Zhi, Guiquan Liu, Xin Li, Hao Wang, and Enhong                                     Conference on Principles of Knowledge Representation and Reasoning(Hanoi,
+      Chen.2025. SelfAug:MitigatingCatastrophicForgettinginRetrieval-Augmented                                 Vietnam)(KR’24). Article 86, 11 pages.  doi:10.24963/kr.2024/86
+      Generation via Distribution Self-Alignment.  arXiv:2509.03934 [cs.CL]  https:                      [25]  Yujia Qin,Shihao Liang, Yining Ye,Kunlun Zhu, Lan Yan, Yaxi Lu, Yankai Lin,
+      //arxiv.org/abs/2509.03934                                                                               Xin Cong, Xiangru Tang, Bill Qian, Sihan Zhao, Lauren Hong, Runchu Tian,
+ [9]  Gautier Izacard, Mathilde Caron, Lucas Hosseini, Sebastian Riedel, Piotr Bo-                             Ruobing Xie, Jie Zhou, Mark Gerstein, Dahai Li, Zhiyuan Liu, and Maosong
+      janowski, Armand Joulin, and Edouard Grave. 2022.   Unsupervised Dense                                   Sun. 2023.  ToolLLM: Facilitating Large Language Models to Master 16000+
+      Information Retrieval with Contrastive Learning.   arXiv:2112.09118 [cs.IR]                              Real-world APIs. arXiv:2307.16789 [cs.AI]  https://arxiv.org/abs/2307.16789
+      https://arxiv.org/abs/2112.09118                                                                   [26]  KandanRamakrishnan,RameswarPanda,QuanfuFan,JohnHenning,AudeOliva,
+[10]  Gautier Izacard and EdouardGrave. 2020. Distilling knowledge from reader to                              and Rogerio Feris. 2020.  Relationship Matters: Relation Guided Knowledge
+      retriever for question answering.arXivpreprintarXiv:2012.04584(2020).                                    TransferforIncrementalLearningofObjectDetectors.InProceedingsofthe2020
+[11]  Gautier Izacard, Patrick Lewis, Maria Lomeli, Lucas Hosseini, Fabio Petroni,                             IEEE/CVFConferenceonComputerVisionandPatternRecognitionWorkshops
+      TimoSchick,JaneDwivedi-Yu,ArmandJoulin,SebastianRiedel,andEdouard                                        (CVPRW). 1009–1018. doi:10.1109/CVPRW50498.2020.00133
+      Grave.2023. Atlas: few-shotlearningwithretrievalaugmentedlanguage models.                          [27]  Sylvestre-AlviseRebuffi,AlexanderKolesnikov,GeorgSperl,andChristophH.
+      J.Mach.Learn.Res.24, 1, Article 251 (Jan. 2023), 43 pages.                                               Lampert. 2017.   iCaRL: Incremental Classifier and Representation Learning.
+[12]  VladimirKarpukhin,BarlasOguz,SewonMin,PatrickLewis,LedellWu, Sergey                                      InProceedings of the 2017 IEEE Conference on Computer Vision and Pattern
+      Edunov, DanqiChen,andWen-tau Yih.2020. Dense Passage RetrievalforOpen-                                   Recognition(CVPR). 5533–5542. doi:10.1109/CVPR.2017.587
+      DomainQuestionAnswering.InProceedingsofthe2020ConferenceonEmpirical                                [28]  Weijia Shi, Sewon Min, Michihiro Yasunaga, Minjoon Seo, Richard James,
+      MethodsinNaturalLanguageProcessing(EMNLP),BonnieWebber,TrevorCohn,                                       Mike Lewis, Luke Zettlemoyer, and Wen-tau Yih. 2024.  REPLUG: Retrieval-
+      YulanHe,andYangLiu(Eds.).AssociationforComputationalLinguistics,Online,                                  AugmentedBlack-Box LanguageModels.InProceedingsofthe2024Conference
+      6769–6781. doi:10.18653/v1/2020.emnlp-main.550                                                           oftheNorthAmericanChapteroftheAssociationforComputationalLinguistics:
+[13]  James Kirkpatrick, Razvan Pascanu, Neil Rabinowitz, Joel Veness, Guillaume                               Human Language Technologies (Volume 1: Long Papers), Kevin Duh, Helena
+      Desjardins,AndreiA.Rusu,KieranMilan,JohnQuan,TiagoRamalho,Agnieszka                                      Gomez, and Steven Bethard (Eds.). Association for Computational Linguistics,
+      Grabska-Barwinska, DemisHassabis, Claudia Clopath, Dharshan Kumaran, and                                 Mexico City, Mexico, 8371–8384. doi:10.18653/v1/2024.naacl-long.463
+      Raia Hadsell. 2017.   Overcoming catastrophic forgetting in neural networks.                       [29]  Weijia Shi, Sewon Min, Michihiro Yasunaga, Minjoon Seo, Richard James,
+      Proceedings of the National Academy of Sciences114, 13 (2017), 3521–3526.                                Mike Lewis, Luke Zettlemoyer, and Wen-tau Yih. 2024.  REPLUG: Retrieval-
+      arXiv:https://www.pnas.org/doi/pdf/10.1073/pnas.1611835114doi:10.1073/pnas.                              AugmentedBlack-Box LanguageModels.InProceedingsofthe2024Conference
+      1611835114                                                                                               oftheNorthAmericanChapteroftheAssociationforComputationalLinguistics:
+[14]  Tom Kwiatkowski, Jennimaria Palomaki, Olivia Redfield, Michael Collins, Ankur                            Human Language Technologies (Volume 1: Long Papers), Kevin Duh, Helena
+      Parikh,ChrisAlberti,DanielleEpstein,IlliaPolosukhin,JacobDevlin,KentonLee,                               Gomez, and Steven Bethard (Eds.). Association for Computational Linguistics,
+      KristinaToutanova,LlionJones,MatthewKelcey,Ming-WeiChang,AndrewM.                                        Mexico City, Mexico, 8371–8384. doi:10.18653/v1/2024.naacl-long.463
+      Dai, Jakob Uszkoreit, Quoc Le, and Slav Petrov. 2019.  Natural Questions: A                        [30]  ShamaneSiriwardhana,RivinduWeerasekera,ElliottWen,TharinduKaluarachchi,
+      Benchmark for Question Answering Research.TransactionsoftheAssociation                                   Rajib Rana, and Suranga Nanayakkara. 2023. Improving the Domain Adaptation
+      forComputationalLinguistics7 (2019), 452–466. doi:10.1162/tacl_a_00276                                   of RetrievalAugmented Generation (RAG) Modelsfor Open Domain Question
+[15]  Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng,                                       Answering.Transactions of the Association for Computational Linguistics11
+      Cody Hao Yu, Joseph Gonzalez, Hao Zhang, and Ion Stoica. 2023.  Efficient                                (2023), 1–17. doi:10.1162/tacl_a_00530
+      Memory Management for Large Language Model Serving with PagedAttention.                            [31]  Adam Trischler, Tong Wang, Xingdi Yuan, Justin Harris, Alessandro Sordoni,
+      InProceedingsofthe29thSymposiumonOperatingSystemsPrinciples(Koblenz,                                     PhilipBachman,andKaheerSuleman.2017. NewsQA:AMachineComprehen-
+      Germany)(SOSP ’23). Association for Computing Machinery, New York, NY,                                   sion Dataset. InProceedingsofthe2ndWorkshoponRepresentationLearningfor
+      USA, 611–626.  doi:10.1145/3600006.3613165                                                               NLP, Phil Blunsom, Antoine Bordes, Kyunghyun Cho, Shay Cohen, Chris Dyer,
+[16]  PatrickLewis,EthanPerez,AleksandraPiktus,FabioPetroni,VladimirKarpukhin,                                 Edward Grefenstette, Karl Moritz Hermann, Laura Rimell, Jason Weston, and
+      Naman Goyal, Heinrich Küttler, Mike Lewis, Wen-tau Yih, Tim Rocktäschel, Se-                             Scott Yih (Eds.). Association for Computational Linguistics, Vancouver, Canada,
+      bastian Riedel, and Douwe Kiela. 2020.  Retrieval-augmented generation for                               191–200. doi:10.18653/v1/W17-2623
+      knowledge-intensive NLP tasks. InProceedingsofthe34thInternationalConfer-                          [32]  Shangqing Tu, Yuanchun Wang, Jifan Yu, Yuyang Xie, Yaran Shi, Xiaozhi Wang,
+      enceonNeuralInformationProcessingSystems(Vancouver, BC, Canada)(NIPS                                     JingZhang,LeiHou,andJuanziLi.2024. R-Eval:AUnifiedToolkitforEvalu-
+                                                                                                               ating Domain Knowledge of Retrieval Augmented Large Language Models. In
+
+========== PDF PAGE 10 / 11 ==========
+WWW ’26, April 13–17, 2026, Dubai, United Arab Emirates.                                                                                                                                               Senlei Zhang et al.
+
+
+      Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery
+      and Data Mining(Barcelona, Spain)(KDD ’24). Association for Computing
+      Machinery, New York, NY, USA, 5813–5824.  doi:10.1145/3637528.3671564
+[33]  Gido M. van de Ven and Andreas S. Tolias. 2019. Three scenarios for continual
+      learning. arXiv:1904.07734 [cs.LG]  https://arxiv.org/abs/1904.07734
+[34]  Denny Vrandeˇci´c and Markus Krötzsch. 2014.  Wikidata: a free collaborative
+      knowledgebase.Commun.ACM57,10(Sept.2014),78–85. doi:10.1145/2629489
+[35]  LucyLuWang,KyleLo,YoganandChandrasekhar,RussellReas,JiangjiangYang,
+      DougBurdick,DarrinEide,KathrynFunk,YannisKatsis,RodneyKinney,Yunyao
+      Li, Ziyang Liu, William Merrill, Paul Mooney, Dewey Murdick, Devvret Rishi,
+      JerrySheehan,ZhihongShen,BrandonStilson,AlexWade,KuansanWang,Nancy
+      Xin Ru Wang, Chris Wilhelm, Boya Xie, Douglas Raymond, Daniel S. Weld,
+      Oren Etzioni, and Sebastian Kohlmeier. 2020. CORD-19: The COVID-19 Open
+      Research Dataset. arXiv:2004.10706 [cs.DL]  https://arxiv.org/abs/2004.10706
+[36]  Chien-Sheng Wu, Andrea Madotto, Wenhao Liu, Pascale Fung, and Caiming
+      Xiong. 2022. QAConv: Question Answering on Informative Conversations. In
+      Proceedings of the 60th Annual Meeting of the Association for Computational
+      Linguistics (Volume 1: Long Papers), Smaranda Muresan, Preslav Nakov, and
+      Aline Villavicencio (Eds.). Association for Computational Linguistics, Dublin,
+      Ireland, 5389–5411. doi:10.18653/v1/2022.acl-long.370
+[37]  Peng Xu, Wei Ping, Xianchao Wu, Chejian Xu, Zihan Liu, Mohammad Shoeybi,
+      andBryan Catanzaro.2025. ChatQA 2:Bridgingthe GaptoProprietary LLMsin
+      Long Context and RAG Capabilities. arXiv:2407.14482 [cs.CL]  https://arxiv.org/
+      abs/2407.14482
+[38]  An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng,
+      Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, Chujie Zheng, Dayiheng
+      Liu, Fan Zhou, Fei Huang, Feng Hu, Hao Ge, Haoran Wei, Huan Lin, Jialong
+      Tang, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin Yang, Jiaxi Yang, Jing
+      Zhou, Jingren Zhou, Junyang Lin, Kai Dang, Keqin Bao, Kexin Yang, Le Yu,
+      LianghaoDeng,MeiLi,MingfengXue,MingzeLi,PeiZhang,PengWang,Qin
+      Zhu, Rui Men, Ruize Gao, Shixuan Liu, Shuang Luo, Tianhao Li, Tianyi Tang,
+      WenbiaoYin,XingzhangRen,XinyuWang,XinyuZhang,XuanchengRen,Yang
+      Fan,YangSu,YichangZhang,YingerZhang,YuWan,YuqiongLiu,ZekunWang,
+      ZeyuCui,ZhenruZhang,ZhipengZhou,andZihanQiu.2025. Qwen3Technical
+      Report. arXiv:2505.09388 [cs.CL]  https://arxiv.org/abs/2505.09388
+[39]  Ori  Yoran,  Tomer  Wolfson,  Ori  Ram,  and  Jonathan  Berant.  2024.    Mak-
+      ing  Retrieval-Augmented  Language  Models  Robust  to  Irrelevant  Context.
+      arXiv:2310.01558 [cs.CL]  https://arxiv.org/abs/2310.01558
+[40]  Zichun Yu, Chenyan Xiong, Shi Yu, and Zhiyuan Liu. 2023.  Augmentation-
+      Adapted Retriever Improves Generalization of Language Models as Generic
+      Plug-In.InProceedingsofthe61stAnnualMeetingoftheAssociationforCompu-
+      tationalLinguistics(Volume1:LongPapers), Anna Rogers, Jordan Boyd-Graber,
+      andNaoakiOkazaki(Eds.).AssociationforComputationalLinguistics,Toronto,
+      Canada, 2421–2436. doi:10.18653/v1/2023.acl-long.136
+[41]  Friedemann Zenke, Ben Poole, and Surya Ganguli. 2017.  Continual learning
+      through synaptic intelligence. InProceedings of the 34th International Confer-
+      ence on Machine Learning - Volume 70(Sydney, NSW, Australia)(ICML’17).
+      JMLR.org, 3987–3995.
+[42]  Bowen  Zhao,  Xi  Xiao,  Guojun  Gan,  Bin  Zhang,  and  Shutao  Xia.  2019.
+      Maintaining  Discrimination  and  Fairness  in  Class  Incremental  Learning.
+      arXiv:1911.07053 [cs.CV]  https://arxiv.org/abs/1911.07053
+[43]  Penghao Zhao, Hailin Zhang, Qinhan Yu, Zhengren Wang, Yunteng Geng,
+      Fangcheng   Fu,   Ling   Yang,   Wentao   Zhang,   Jie   Jiang,   and   Bin   Cui.
+      2024.  Retrieval-Augmented Generation for AI-Generated Content: A Survey.
+      arXiv:2402.19473 [cs.CV]  https://arxiv.org/abs/2402.19473
+[44]  Nan Zhou, Jiaxin Chen, and Di Huang. 2024.  iVPT: Improving Task-relevant
+      InformationSharinginVisualPromptTuningbyCross-layerDynamicConnection.
+      arXiv:2404.05207 [cs.CV]  https://arxiv.org/abs/2404.05207
+
+========== PDF PAGE 11 / 11 ==========
+                    FlowRAG: Continual Learning for Dynamic Retriever in Retrieval-Augmented Generation                          WWW ’26, April 13–17, 2026, Dubai, United Arab Emirates.
+
+                    A    Experiemnt Details                                                                                               Table 6: Detailed Performance on Training Order 2
+                    A.1    Prompt Template
+                    Theprompttemplateto generatetheresponseintheexperimentis
+                    show in Figure 6.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                    Figure6:Theprompttogeneratetheresponseintheexperiment.
+
+                                                                                                                                          Table 7: Detailed Performance on Training Order 3
+                    B    Device
+                    Thisinformation aboutthe devicecurrentlyused inthe experiment
+                    is list in 4.
+
+                                                Table 4: device information.
+
+
+                                                              Detail
+                                    CPU                     Intel Xeon Platinum 8368Q
+                                    GPU                    2× NVIDIA A100 80GB
+                                    CUDA Version    12.8
+
+
+                    C    Result Details
+
+                             Table 5: Detailed Performance on Training Order 1
+
+
+
+
+                                                                                                                                     Table 5 – 7 report detailed results for all methods under three
+                                                                                                                                 sequence orders, using the Llama model as the generator:
+                                                                                                                                     (1) CovidQA→NewsQA→ConvQA→NQ
+                                                                                                                                     (2) CovidQA→NQ→NewsQA→CovidQA
+                                                                                                                                     (3) ConvQA→CovidQA→NewsQA→NQ
+                                                                                                                                     We report two evaluation metrics: (1) Top-5 retrieval accuracy.
+                                                                                                                                 (2) F1 score.
+                                                                                                                                     Baselines.For fine-tuning methods, we train the retriever with
+                                                                                                                                 AdamW, using a learning rate of 1×10 −5   and a warm-up ratio of
+                                                                                                                                 0.1. ForL2R, we follow the experimental setup from the original
+                                                                                                                                 paper [2].
+
+
+
+
+
+
+
+
+Trainon→            CovidQA           NewsQA           ConvQA              NQTrainon→            CovidQA              NQ              NewsQA           ConvQATrainon→            ConvQA           CovidQA           NewsQA              NQACC@5    F1    ACC@5    F1    ACC@5    F1    ACC@5    F1ACC@5    F1    ACC@5    F1    ACC@5    F1    ACC@5    F1ACC@5    F1    ACC@5    F1    ACC@5    F1    ACC@5    F1
+
+REPULGREPULGREPULG
+CovidQA         11.22    21.77CovidQA         11.22    21.16ConvQA          38.87    33.22
+NewsQA           8.70     18.42    31.84    24.10NQ                 6.12     18.94    57.21    44.93CovidQA         29.09    25.30    12.69    22.88
+ConvQA           4.79     15.44    22.85    19.90    38.16    37.89NewsQA           2.70     14.95    40.71    35.84    29.05    22.13NewsQA          17.07    18.10     6.08     17.83    19.49    17.30
+NQ                 2.98     12.16    13.35    11.02    25.23    28.60    56.46    53.86ConvQA           1.97     10.31    21.52    28.56    17.03    15.95    39.79    33.88NQ                 9.54      9.79      3.55     12.96    10.45    10.78    50.39    42.63
+EndEndRAGEndEndRAGEndEndRAG
+CovidQA         10.76    21.16CovidQA         10.76    20.57ConvQA          43.44    35.94
+NewsQA           7.47     16.51    32.62    23.65NQ                 5.34     14.96    54.43    43.96CovidQA         32.96    29.15    13.03    22.85
+ConvQA           4.45     15.59    22.13    18.90    46.44    32.61NewsQA           2.64     12.96    37.83    37.98    32.21    24.22NewsQA          19.96    20.41     7.42     15.76    30.92    22.61
+NQ                 3.00     11.33    11.15    12.74    27.72    25.02    54.89    50.87ConvQA           1.51     10.42    12.61    30.75    15.15    16.63    45.71    38.00NQ                12.30    12.43     2.72     10.63    22.34    16.00    55.20    44.40
+AtlasAtlasAtlas
+CovidQA         11.90    20.57CovidQA         11.90    21.77ConvQA          41.87    35.30
+NewsQA           7.14     17.56    29.35    20.78NQ                 7.34     18.77    55.84    44.68CovidQA         33.81    28.29    12.75    22.38
+ConvQA           5.11     14.12    19.31    15.30    39.87    33.30NewsQA           3.42     15.99    35.81    33.25    32.91    24.18NewsQA          21.70    14.38     9.59     19.52    30.76    23.16
+NQ                 1.25     10.67    10.51     9.87     23.87    20.85    53.84    52.68ConvQA           2.53     12.97    17.86    26.70    16.99    16.70    44.66    36.67NQ                14.48     9.46      4.95     14.92    19.70    15.24    53.70    44.72
+L2RL2RL2R
+CovidQA         11.27    21.07CovidQA         11.75    21.88ConvQA          41.60    35.98
+NewsQA          10.68    19.94    29.17    21.47NQ                 9.50     19.46    55.56    44.13CovidQA         37.39    32.86    12.95    24.59
+ConvQA           9.14     18.29    26.08    18.47    39.56    33.57NewsQA           7.97     18.59    47.34    39.08    32.24    24.24NewsQA          28.10    27.13    10.31    21.99    30.60    23.35
+NQ                 7.98     15.11    21.77    14.26    29.60    27.40    58.44    52.17ConvQA           6.15     16.98    39.84    35.84    27.85    22.03    43.70    37.80NQ                24.44    23.74     7.92     18.48    24.15    20.71    56.29    43.13

@@ -1,0 +1,907 @@
+
+
+========== PDF PAGE 1 / 10 ==========
+Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 6: Industry Track), pages 507–516
+July 2-7, 2026 ©2026 Association for Computational Linguistics
+NEST: Nested Evidence Survival for Retrieval
+Akshay Verma
+Amazon
+Siddharth Pillai
+Amazon
+Prateek Sircar
+Amazon
+Deepak Gupta
+Amazon
+Abstract
+Retrieval-Augmented Generation (RAG) sys-
+tems degrade sharply under extreme noise,
+where relevant evidence is sparse and easily
+pruned by static retrieval decisions. Existing
+approaches fixed top-k retrieval, hierarchical
+chunking, cross-encoder reranking, or policy-
+based iterative control- either rely on rigid
+heuristics or incur substantial computational
+overhead, and often fail to recover context-
+dependent evidence without introducing redun-
+dancy or latency.
+We introduce NEST (Nested Evidence Survival
+for Retrieval), a lightweight, training-free RAG
+framework that improves factual grounding by
+explicitly separating recall amplification from
+precision selection. NEST first maximizes re-
+call through Nested Evidence Survival , eval-
+uating candidates under nested retrieval con-
+texts to rescue evidence that would otherwise
+be pruned by static chunking. It then applies
+a survival-consistent Mean Reciprocal Rank
+(MRR) selection mechanism to retain evidence
+that remains salient across retrieval scopes, re-
+moving redundancy without harming recall.
+Evaluated on WebQuestions, HotpotQA (dis-
+tractor setting), and a proprietary InternalQA
+benchmark with 50M Common Crawl distrac-
+tors, NEST consistently outperforms strong
+adaptive RAG baselines, including DeepRAG,
+improving EM by up to+2.4 pp and F1 by +2.1
+pp, while increasing retrieval recall by +6.8
+pp. These gains are achieved with only 12–18
+ms additional latency. Ablation studies confirm
+that Nested Evidence Survival drives recall im-
+provements, while MRR-based selection con-
+verts these gains into precision, demonstrating
+that recall-first retrieval with principled prun-
+ing can outperform iterative control and model
+scaling in retrieval-augmented generation.
+1 Introduction
+Retrieval-Augmented Generation (RAG) has be-
+come a core technique for improving the factual
+accuracy of large language models (LLMs) by
+grounding generation in retrieved external knowl-
+edge (Lewis et al., 2020; Izacard et al., 2022). De-
+spite its success, most RAG systems still rely on
+static retrieval: a fixed number of passages re-
+trieved at a single granularity, regardless of whether
+relevant evidence is implicit, context-dependent, or
+distributed across documents. This results in a per-
+sistent trade-off: small top- k values cause early
+pruning and missing evidence, while large values
+introduce redundancy, noise, and latency.
+Hierarchical clustering and static chunking meth-
+ods (Jain et al., 2025) attempt to address this issue
+through corpus reorganization, but remain funda-
+mentally data-centric. Once evidence is pruned at
+a given granularity, it cannot be recovered down-
+stream. Recent adaptive RAG approaches (e.g.,
+DeepRAG (Guan et al., 2025), AutoRAG (Kim
+et al., 2024), ChunkRAG (Singh et al., 2024)) in-
+troduce retrieval control via learned policies or it-
+erative controllers, but typically require retriever
+fine-tuning, additional model training, or repeated
+inference-time retrieval, making them costly and
+difficult to deploy.
+Recent research has identified a key source of
+recall loss in RAG is premature pruning (Zhu et al.,
+2026; Fang et al., 2025; Jiao et al., 2026; Verma
+et al., 2026b): evidence that is weakly aligned in
+isolation (e.g., implicit entities or multi-hop pre-
+requisites) is discarded before sufficient context is
+available to reveal its relevance. Recovering such
+evidence requires not broader retrieval, but contex-
+tual re-evaluation.
+To this end, we propose NEST (Nested Evi-
+dence Survival for Retrieval), a latency-aware RAG
+framework that separates recall amplification from
+precision selection . Rather than increasing re-
+call through larger top-kretrieval or iterative con-
+trollers, NEST evaluates evidence under nested re-
+trieval contexts of increasing constraint, allowing
+context-dependent evidence to be rescued before
+507
+
+========== PDF PAGE 2 / 10 ==========
+any pruning decision is made. This process, termed
+evidence survival, records how candidate relevance
+evolves as retrieval context becomes richer.
+All retrieved evidence is retained as a candi-
+date, ensuring recall expansion without irreversible
+pruning. Final evidence selection is performed
+explicitly using a survival-consistent Mean Recip-
+rocal Rank (MRR) criterion, which favors evidence
+that remains salient across nested retrieval scopes.
+This yields compact, generation-ready context with-
+out cross-encoder reranking or LLM-based control
+flow.
+NEST operates within a single retrieval pass,
+requires no retriever or generator fine-tuning, and
+adds less than 20 ms inference latency, making it
+suitable for real-time deployment.
+Our contributions are:
+• Nested Evidence Survival: A recall-first
+retrieval formulation that rescues context-
+dependent evidence by deferring pruning under
+nested retrieval constraints.
+• Survival-Consistent Selection: An MRR-based
+evidence selection mechanism that converts re-
+call gains into precision.
+• Latency-Aware RAG: A training-free frame-
+work that improves retrieval and generation qual-
+ity with minimal inference overhead.
+2 Related Work
+Retrieval-Augmented Generation (RAG).
+Retrieval-Augmented Generation (RAG) grounds
+LLM outputs in external evidence to improve
+factual reliability (Lewis et al., 2020; Izacard
+et al., 2022; Tiady et al., 2023). While early RAG
+systems used one-shot (fixed top- k) retrieval,
+recent work studies adaptive retrieval -deciding
+when and how to retrieve based on query difficulty
+or uncertainty (Khandelwal et al., 2023). RQ-
+RAG (Chan et al., 2024) learns query refinement
+for ambiguous questions, and DeepRAG (Guan
+et al., 2025) frames retrieval-augmented reasoning
+as a sequential decision process with iterative
+decomposition. Auto-RAG (Kim et al., 2024)
+similarly performs multi-turn interaction with
+the retriever, adapting the number of retrieval
+iterations to question difficulty. Although effective,
+such controller/iteration-based designs often
+introduce additional inference rounds, making
+latency and cost a central deployment constraint.
+Hierarchical Retrieval and Chunking for RAG.
+A major line of work targets granularity mis-
+match in RAG by restructuring evidence into
+passages/chunks and retrieving at finer units.
+ChunkRAG (Singh et al., 2024) evaluates retrieved
+content at chunk level and filters chunks using
+LLM-based relevance scoring, improving ground-
+ing but adding substantial LLM inference over-
+head that can be prohibitive under tight latency
+budgets (Singh et al., 2024). AutoChunker (Jain
+et al., 2025) proposes a structure-aware, bottom-up
+chunking operator that improves chunk coherence
+and reduces noise, and introduces an evaluation
+framework for chunk quality. These approaches
+are largely data-centric: the corpus is chunked (of-
+ten once, offline), and retrieval is then executed at
+a chosen granularity.
+Noise Reduction and Evidence Filtering. Even
+with improved chunking, retrieved evidence can be
+redundant or tangential, motivating post-retrieval
+filtering and reranking. Cross-encoder reranking
+and joint retriever-reranker training can substan-
+tially improve precision, but are compute-intensive
+at inference time. RocketQAv2 (Ren et al., 2021)
+demonstrates strong gains by jointly training dense
+retrieval and reranking, but its reranking stage re-
+mains expensive relative to lightweight scoring
+when applied to large candidate sets. LLM-based
+filtering (e.g., chunk-level judging) can improve
+factuality, yet further increases inference cost and
+latency (Singh et al., 2024; Verma et al., 2026a).
+Overall, prior work improves RAG via (i) it-
+erative controllers and multi-step retrieval (Kim
+et al., 2024; Guan et al., 2025; Chan et al., 2024) or
+(ii) corpus chunking and chunk-level filtering (Jain
+et al., 2025; Singh et al., 2024). NEST is comple-
+mentary: it targets the recall-latency trade-off by
+deferring pruning through nested evidence survival
+at retrieval time, then converting recall gains into
+precision using a lightweight MRR-based selector.
+3 Methodology
+3.1 Method Overview
+NEST is a latency-aware Retrieval-Augmented
+Generation (RAG) framework that improves fac-
+tual grounding by rethinking how retrieval recall
+is maximized and how noise is controlled. Moti-
+vated by recent work on Nested Learning (Behrouz
+et al., 2025), which shows the value of preserving
+information across nested contexts, we adapt these
+508
+
+========== PDF PAGE 3 / 10 ==========
+Figure 1: Overview of NEST
+principles to retrieval, a setting where they have
+not been explored in RAG. Rather than relying on
+larger top-k retrieval, query expansion, or itera-
+tive LLM-driven controllers, NEST introduces a
+retrieval-time formulation that explicitly separates
+recall amplification from precision selection.
+The framework consists of two stages: (i)
+Nested Learning for Retrieval (NL) , which in-
+creases recall by rescuing context-dependent ev-
+idence typically pruned by static chunking or hi-
+erarchical methods, and (ii) Noise Removal via
+Mean Reciprocal Rank (NR-MRR), which con-
+verts this recall gain into precision by selecting evi-
+dence that is consistently relevant across retrieval
+contexts. Together, these stages produce compact,
+generation-ready context with near-constant serv-
+ing latency.
+3.2 Problem Setup
+Given a query q0 and a corpus C, the goal is to
+generate a grounded response y:
+y= G(q0,D∗), D ∗= NRMRR
+(
+NL(q0,C)
+)
+,
+where Gdenotes the generator, NL(·) constructs
+a recall-expanded candidate pool, and NRMRR(·)
+performs final evidence selection. Unlike adaptive
+RAG systems that depend on feedback loops or re-
+peated retrieval, NEST embeds adaptivity directly
+into retrieval structure.
+3.3 Nested Learning for Retrieval (NL)
+Hierarchical clustering and chunking-based re-
+trieval methods(Jain et al., 2025; Singh et al., 2024;
+Kim et al., 2024), organize corpora into documents,
+sections, and chunks prior to retrieval. While ef-
+fective for improving indexing efficiency, these
+methods are data-centric and static: once text is
+partitioned, retrieval decisions are made locally at
+a single granularity, and evidence pruned early can-
+not be recovered.
+This leads to a fundamental failure mode in RAG
+(Jiao et al., 2026). Evidence that is causally rele-
+vant but weakly aligned in isolation (e.g., abstract
+statements, implicit entities, or prerequisite facts)
+is frequently pruned during chunk-level retrieval,
+even though it would become highly relevant when
+conditioned on the correct document or section
+context. Increasing chunk size or retrieving more
+chunks partially alleviates this issue, but does so
+indiscriminately, introducing substantial noise and
+latency.
+Nested Learning as Contextual Evidence Rescue.
+Nested Learning addresses this limitation by shift-
+ing hierarchy from a data organization primitive to
+a retrieval-time evaluation mechanism. Rather than
+committing to a single chunking decision, NL eval-
+uates evidence under progressively richer contex-
+tual constraints, allowing weakly aligned evidence
+to be rescued once sufficient context is available.
+Nested Retrieval Scopes. Given a query q0, NL
+defines a sequence of nested retrieval scopes:
+D(0) ⊃D(1) ⊃···⊃D (L),
+where D(0) is coarse and recall-oriented (e.g.,
+document- or section-level retrieval), and deeper
+scopes enforce finer-grained semantic alignment
+(e.g., passage- or chunk-level retrieval). Crucially,
+NL performs no irreversible pruning: any evidence
+retrieved at any level is retained as a candidate.
+509
+
+========== PDF PAGE 4 / 10 ==========
+Evidence Survival. Let c denote an evidence
+unit. If cappears at level ℓwith rank r(ℓ)(c), we
+record this in its survival profile:
+S(c) =
+{
+r(ℓ)(c) |c∈D(ℓ), ℓ= 0,...,L
+}
+.
+Survival does not imply selection. Instead, it cap-
+tures how evidence behaves as retrieval context
+becomes increasingly informative.
+Consider the query “Who discovered the ele-
+ment used in X-ray machines?” . Chunk-level re-
+trieval often surfaces generic passages on X-ray
+devices while discarding mentions of radium due
+to indirect phrasing. Hierarchical chunking meth-
+ods prune such evidence early. NL first retrieves
+documents on radiation and early radiology, then
+re-evaluates passages under this broader context,
+allowing radium-related evidence to re-emerge and
+persist.
+Nested Learning improves recall not by retriev-
+ing more data (Refer Table 3), but by delaying prun-
+ing decisions until sufficient context is available.
+This enables the recovery of implicit, abstract, or
+multi-hop evidence that hierarchical clustering and
+static chunking methods systematically eliminate.
+Formally,
+Recall(NL) ≥Recall(Chunk-Level Retrieval),
+while maintaining a bounded candidate pool.
+Latency-Bounded Execution. All retrieval
+scopes are evaluated within a single retrieval pass,
+reusing document and passage representations. Let
+Nℓ denote the number of candidates evaluated at
+level ℓ, with Nℓ+1 ≪Nℓ. The total cost is:
+CNL =
+L∑
+ℓ=0
+O(Nℓ).
+In practice, NL adds only 10–18 ms over a single-
+stage dense retriever, significantly lower than ap-
+proaches that rely on repeated retrieval or LLM-
+based controllers.
+3.4 Noise Removal via Mean Reciprocal Rank
+(NR-MRR)
+Nested Learning intentionally increases recall,
+which may introduce redundant or weakly aligned
+evidence. Noise removal in NEST is therefore an
+explicit selection step, performed only after recall
+expansion.
+Survival-Consistent Evidence Scoring.
+Causally relevant evidence tends to remain
+salient as retrieval context becomes more selective,
+while spurious evidence exhibits unstable rank
+behavior. NR-MRR exploits this observation.
+For a candidate cwith survival profile S(c), we
+define:
+MRR(c) = 1
+|L(c)|
+∑
+ℓ∈L(c)
+1
+r(ℓ)(c),
+where L(c) indexes the levels where c appears.
+This score rewards evidence that persists and main-
+tains high rank across nested contexts.
+Continuing the previous example, passages de-
+scribing imaging hardware rank well at coarse lev-
+els but disappear at finer scopes. In contrast, pas-
+sages linking radium to its discovery persist across
+contexts. MRR captures this persistence directly.
+Evidence Selection. Candidates are ranked by
+MRR(c), and the top-kare retained:
+D∗= Topk
+(
+MRR(c)
+)
+.
+This converts recall gains from NL into precision,
+yielding compact, generation-ready context.
+3.5 Computational Cost and Latency Analysis
+NEST is designed for real-time deployment. Both
+NL and NR-MRR operate within a fixed retrieval
+budget and introduce no iterative retrieval loops.
+The expected cost is:
+E[CNEST ] ≈Cretr + Crank,
+where Crank is linear in the number of candidates.
+Empirically, NR-MRR adds less than 2 ms, result-
+ing in end-to-end latency substantially lower than
+controller-based RAG systems.
+4 Experiments
+We evaluate NEST on three retrieval-augmented
+generation benchmarks: WebQuestions (Berant
+et al., 2013), HotpotQA (distractor setting) (Yang
+et al., 2018; Verma et al., 2025), and a propri-
+etary InternalQA dataset. All experiments fol-
+low the same evaluation protocol and metrics used
+by DeepRAG (Guan et al., 2025), ensuring direct
+comparability. We focus on a high-noise retrieval
+regime to stress-test NEST’s ability to improve re-
+call while maintaining compact, generation-ready
+evidence.
+510
+
+========== PDF PAGE 5 / 10 ==========
+Algorithm 1 NEST : Nested Evidence Survival +
+NR-MRR Selection
+Require: q0, C, scopes {ℓ0, . . . , ℓL}, budgets
+{K0, . . . , KL}, final k
+Ensure: D∗
+1: // NES
+2: Ccand ←∅, S ←{}
+3: for ℓ = 0to L do
+4: D(ℓ) ←RETRIEVE (q0, C, ℓ, Kℓ)
+5: for each c at rank r(ℓ)(c) in D(ℓ) do
+6: Ccand ←Ccand ∪{c}
+7: Append (ℓ, r(ℓ)(c)) to S(c)
+8: end for
+9: end for
+10: // NR-MRR
+11: for each c ∈Ccand do
+12: MRR (c) ← 1
+|S(c)|
+∑
+(ℓ,r)∈S(c)
+1
+r
+13: end for
+14: D∗←Topk
+(
+MRR(c)
+)
+15: return D∗=0
+4.1 Experimental Setup
+Retrieval Corpus. To emulate large-scale web
+retrieval, we embed all gold passages into a 50M-
+passage corpus constructed from Common Crawl
+(CC-News, 2023). This yields an extreme signal-
+to-noise ratio ( < 0.0001%), where relevant evi-
+dence is heavily diluted by distractors. Such a
+setup is critical for evaluating recall-oriented re-
+trieval methods.
+Generator. We use GPT-4-turbo as the genera-
+tor G(q0,D∗). Generation is conditioned only on
+the final evidence set selected by NR-MRR, allow-
+ing us to directly measure the impact of retrieval
+quality.
+Retrieval Backbone. We employ a hybrid re-
+triever combining BM25 and Contriever (Izacard
+et al., 2021), with weightingλ=0.4, consistent with
+prior work. This backbone is shared across all base-
+lines and ablations.
+Nested Evidence Survival (NES). NES per-
+forms retrieval across three nested scopes:
+document-level, section-level, and chunk-level. All
+scopes are evaluated within a single retrieval pass,
+reusing embeddings. Importantly, no pruning is
+applied during NES; all retrieved candidates are
+retained to maximize recall.
+Noise Removal (NR-MRR). NR-MRR aggre-
+gates reciprocal rank signals across nested scopes
+and selects the top-kevidence units. This step intro-
+duces no additional model inference and operates
+in linear time over candidate lists.
+Hardware and Efficiency. All experiments are
+conducted on 8×A100 GPUs (80GB). Reported
+latency includes retrieval, NES, NR-MRR, and gen-
+eration. NEST adds only 12–18 ms over a standard
+RAG pipeline.
+4.2 Datasets
+WebQuestions consists of 2,032 open-domain
+factoid questions with Freebase-derived answers.
+HotpotQA (distractor) contains 7,405 multi-hop
+questions requiring retrieval of two supporting
+Wikipedia passages among distractors. We use
+the full-text distractor setting. InternalQA is a
+proprietary 20K-question dataset covering ambigu-
+ous and catalog-heavy queries; we report relative
+improvements only.
+4.3 Baselines
+We compare against representative RAG systems:
+Vanilla RAG (single-pass retrieval, k=20), Iter-
+ative RAG (Trivedi et al., 2023) (three fixed re-
+formulations), AutoRAG (Kim et al., 2024) (fixed
+multi-stage retrieval), and DeepRAG (Guan et al.,
+2025) (reinforcement-trained adaptive retrieval).
+These baselines cover static, heuristic, and learned
+retrieval control.
+4.4 Evaluation Metrics
+Following DeepRAG, we report Exact Match
+(EM) and F1 to evaluate factual correctness. To
+analyze retrieval quality, we report Recall@50 of
+gold passages, measuring the ability to surface rele-
+vant evidence. We also report Redundancy Ratio,
+defined as the average pairwise cosine similarity
+among selected chunks (threshold > 0.85), and
+end-to-end latency (ms).
+4.5 Main Results
+NEST consistently outperforms all baselines
+across generation accuracy and retrieval quality.
+As shown in Table 1, NEST achieves+2.4 pp EM
+and +2.1 pp F1 on WebQuestions over DeepRAG,
+with similar gains on HotpotQA. On InternalQA,
+NEST improves EM by +4.6 pp.
+Crucially, these gains are accompanied by a+6.8
+pp improvement in Recall@50 , demonstrating
+that nested evidence survival successfully rescues
+relevant evidence that static or chunk-only retrieval
+misses. At the same time, NR-MRR reduces re-
+dundancy by 31% (Table 2), confirming that recall
+gains do not come at the cost of noise. Latency
+511
+
+========== PDF PAGE 6 / 10 ==========
+Method WebQuestions HotpotQA InternalQA
+EM↑ F1↑ EM↑ F1↑ EM↑ F1↑
+Vanilla RAG 52.3 68.7 41.8 59.4 - -
+Iterative RAG 56.1 71.4 45.2 62.8 +2.1 +1.8
+AutoRAG 57.8 72.9 46.7 64.1 +2.3 +2.0
+DeepRAG∗ 60.4 75.2 49.3 66.7 +3.4 +2.6
+NEST 62.8 77.3 53.6 68.4 +4.6 +3.9
+Table 1: Generation performance across benchmarks.
+Method Recall@50↑ Redundancy↓ Latency (ms)↓
+Vanilla RAG 71.2 0.68 820
+AutoRAG 76.4 0.59 1,180
+DeepRAG∗ 78.1 0.55 1,650
+NEST 84.9 0.47 836
+Table 2: Retrieval recall, redundancy, and latency.
+remains comparable to Vanilla RAG, and substan-
+tially lower than controller-based methods.
+4.6 Ablation Study
+We conduct ablations on WebQuestions to isolate
+the roles of Nested Evidence Survival (NES) and
+NR-MRR.
+Effect of Nested Evidence Survival (NES). Re-
+moving NES ( flat chunk retrieval ) reduces Re-
+call@50 by 9.1 pp and causes a sharp EM drop
+(62.8 → 54.1). This confirms that NES improves
+performance by rescuing context-dependent evi-
+dence that static chunk-level retrieval prunes pre-
+maturely.
+Effect of NR-MRR. Disabling NR-MRR (w/o
+NR) preserves high recall (84.3) but significantly
+increases redundancy (0.63), leading to a 6.7 pp
+EM drop. This shows that NR-MRR is essential
+for converting recall gains into usable precision
+without harming recall.
+Recall–Precision Decoupling. Together, NES
+and NR-MRR decouple recall amplification from
+precision control. NES expands the candidate pool
+structurally, while NR-MRR performs principled
+pruning based on cross-scope consistency. Remov-
+ing either component degrades performance, while
+removing both collapses to Vanilla RAG.
+5 Conclusion
+We presented NEST (Nested Evidence Survival for
+Retrieval), a retrieval-augmented generation frame-
+work that improves factual grounding by rethinking
+how recall is maximized and how noise is subse-
+quently controlled. Rather than relying on model
+Variant EM↑ F1↑ Recall@50↑ Red.↓ Lat.
+NEST 62.8 77.3 84.9 0.47 836
+w/o NES 54.1 69.2 75.8 0.60 822
+w/o NR 56.1 71.0 84.3 0.63 834
+Table 3: Ablation on WebQuestions.
+scaling, iterative controllers, or aggressive top-kex-
+pansion, NEST separates retrieval intorecall ampli-
+fication via Nested Evidence Survival andprecision
+selection via survival-consistent MRR filtering.
+Across WebQuestions, HotpotQA, and Inter-
+nalQA, NEST consistently outperforms strong
+adaptive RAG baselines, achieving higher fac-
+tual accuracy while maintaining near real-time la-
+tency. Ablation studies show that Nested Evidence
+Survival significantly improves recall by rescuing
+context-dependent evidence that static chunking
+and hierarchical pruning discard, while NR-MRR
+converts this recall gain into precision without
+harming retrieval coverage.
+Overall, NEST demonstrates that retrieval-time
+structure, rather than heavier models or iterative
+control, can drive effective and efficient retrieval-
+grounded generation. This work suggests a promis-
+ing direction for RAG systems: prioritizing recall-
+first evidence survival followed by principled,
+lightweight selection, enabling scalable and trust-
+worthy deployment in knowledge-intensive appli-
+cations.
+6 Limitations
+While NEST improves retrieval recall and evidence
+quality without relying on iterative controllers or
+model fine-tuning, it remains dependent on the un-
+derlying retriever to surface at least a weakly rel-
+evant candidate at coarse retrieval scopes. Nested
+Evidence Survival mitigates premature pruning by
+deferring elimination decisions, but cannot recover
+evidence that is entirely absent or poorly indexed
+in the corpus.
+In addition, although NEST introduces only
+12–18 ms of additional latency compared to stan-
+dard RAG pipelines, this overhead may be non-
+negligible in ultra-low-latency or streaming set-
+tings. Future work could explore hardware-aware
+execution, candidate caching across nested scopes,
+and tighter integration with approximate nearest-
+neighbor search to further reduce end-to-end la-
+tency.
+512
+
+========== PDF PAGE 7 / 10 ==========
+References
+Ali Behrouz, Meisam Razaviyayn, Peilin Zhong, and
+Vahab Mirrokni. 2025. Nested learning: The illusion
+of deep learning architectures. In Advances in Neu-
+ral Information Processing Systems (NeurIPS) 2025.
+Poster.
+Jonathan Berant, Andrew Chou, Roy Frostig, and Percy
+Liang. 2013. Semantic parsing on Freebase from
+question-answer pairs. In Proceedings of the 2013
+Conference on Empirical Methods in Natural Lan-
+guage Processing, pages 1533–1544, Seattle, Wash-
+ington, USA. Association for Computational Linguis-
+tics.
+Chi-Min Chan, Chunpu Xu, Ruibin Yuan, Hongyin Luo,
+Wei Xue, Yi-Ting Guo, and Jie Fu. 2024. Rq-rag:
+Learning to refine queries for retrieval augmented
+generation. ArXiv, abs/2404.00610.
+Yixiong Fang, Tianran Sun, Yuling Shi, and Xiaodong
+Gu. 2025. Attentionrag: Attention-guided context
+pruning in retrieval-augmented generation.
+Xinyan Guan, Jiali Zeng, Fandong Meng, Chunlei Xin,
+Yaojie Lu, Hongyu Lin, Xianpei Han, Le Sun, and
+Jie Zhou. 2025. Deeprag: Thinking to retrieve step
+by step for large language models.
+Gautier Izacard, Mathilde Caron, Lucas Hosseini, Se-
+bastian Riedel, Piotr Bojanowski, Armand Joulin,
+and Edouard Grave. 2021. Unsupervised dense in-
+formation retrieval with contrastive learning. Trans.
+Mach. Learn. Res., 2022.
+Gautier Izacard, Patrick Lewis, Maria Lomeli, Lucas
+Hosseini, Fabio Petroni, Timo Schick, Jane A. Yu,
+Armand Joulin, Sebastian Riedel, and Edouard Grave.
+2022. Few-shot learning with retrieval augmented
+language models. J. Mach. Learn. Res., 24:251:1–
+251:43.
+Arihant Jain, Purav Aggarwal, and Anoop Saladi. 2025.
+AutoChunker: Structured text chunking and its eval-
+uation. In Proceedings of the 63rd Annual Meet-
+ing of the Association for Computational Linguistics
+(Volume 6: Industry Track), pages 983–995, Vienna,
+Austria. Association for Computational Linguistics.
+Shuguang Jiao, Xinyu Xiao, Yunfan Wei, Shuhan Qi,
+Chengkai Huang, Quan Z. Michael Sheng, and Lina
+Yao. 2026. Prunerag: Confidence-guided query de-
+composition trees for efficient retrieval-augmented
+generation.
+Anant Khandelwal, Happy Mittal, Shreyas Sunil Kulka-
+rni, and Deepak Gupta. 2023. Large scale generative
+multimodal attribute extraction for e-commerce at-
+tributes. CoRR, abs/2306.00379.
+Dongkyu Kim, Byoungwook Kim, Donggeon Han, and
+Matouvs Eibich. 2024. Autorag: Automated frame-
+work for optimization of retrieval augmented genera-
+tion pipeline. ArXiv, abs/2410.20878.
+Patrick Lewis, Ethan Perez, Aleksandara Piktus, Fabio
+Petroni, Vladimir Karpukhin, Naman Goyal, Hein-
+rich Kuttler, Mike Lewis, Wen tau Yih, Tim Rock-
+täschel, Sebastian Riedel, and Douwe Kiela. 2020.
+Retrieval-augmented generation for knowledge-
+intensive nlp tasks. ArXiv, abs/2005.11401.
+Ruiyang Ren, Yingqi Qu, Jing Liu, Wayne Xin Zhao,
+QiaoQiao She, Hua Wu, Haifeng Wang, and Ji-Rong
+Wen. 2021. RocketQAv2: A joint training method
+for dense passage retrieval and passage re-ranking.
+In Proceedings of the 2021 Conference on Empiri-
+cal Methods in Natural Language Processing, pages
+2825–2835, Online and Punta Cana, Dominican Re-
+public. Association for Computational Linguistics.
+Ishneet Sukhvinder Singh, Ritvik Aggarwal, Ibrahim
+Allahverdiyev, Muhammad Taha, Aslihan Akalin,
+Kevin Zhu, and Sean O’Brien. 2024. Chunkrag:
+Novel llm-chunk filtering method for rag systems.
+ArXiv, abs/2410.19572.
+Sambeet Tiady, Anirban Majumder, and Deepak Gupta.
+2023. Prodigy: Product design guidance at scale. In
+CIKM, pages 4836–4842.
+Harsh Trivedi, Niranjan Balasubramanian, Tushar Khot,
+and Ashish Sabharwal. 2023. Interleaving retrieval
+with chain-of-thought reasoning for knowledge-
+intensive multi-step questions. In Proceedings of
+the 61st Annual Meeting of the Association for Com-
+putational Linguistics (Volume 1: Long Papers) ,
+pages 10014–10037, Toronto, Canada. Association
+for Computational Linguistics.
+Akshay Verma, Swapnil Gupta, Deepak Gupta, Pra-
+teek Sircar, and Siddharth Pillai. 2026a. SELENE:
+Selective and evidence-weighted LLM debating for
+efficient and reliable reasoning. In Proceedings of
+the 19th Conference of the European Chapter of the
+Association for Computational Linguistics (Volume
+5: Industry Track), pages 95–104, Rabat, Morocco.
+Association for Computational Linguistics.
+Akshay Verma, Swapnil Gupta, Siddharth Pillai, Prateek
+Sircar, and Deepak Gupta. 2026b. ReflectiveRAG:
+Rethinking adaptivity in retrieval-augmented gener-
+ation. In Proceedings of the 19th Conference of the
+European Chapter of the Association for Computa-
+tional Linguistics (Volume 5: Industry Track), pages
+377–384, Rabat, Morocco. Association for Computa-
+tional Linguistics.
+Vinay Kumar Verma, Shreyas Sunil Kulkarni, Happy
+Mittal, and Deepak Gupta. 2025. Moemoe: Question
+guided dense and scalable sparse mixture-of-expert
+for multi-source multi-modal answering. arXiv
+preprint arXiv:2503.06296.
+Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Ben-
+gio, William W. Cohen, Ruslan Salakhutdinov, and
+Christopher D. Manning. 2018. Hotpotqa: A dataset
+for diverse, explainable multi-hop question answer-
+ing. In Conference on Empirical Methods in Natural
+Language Processing.
+513
+
+========== PDF PAGE 8 / 10 ==========
+Siyuan Zhu, Chengdong Xu, Kaiqiang Ke, and Chao Yu.
+2026. Context-picker: Dynamic context selection
+using multi-stage reinforcement learning.
+A Additional Analysis and Robustness
+Studies
+This appendix provides additional empirical and
+qualitative analyses to assess the robustness, in-
+terpretability, and failure modes of NEST. All ex-
+periments follow the same setup described in Sec-
+tion 4.1, using identical retrievers, generators, and
+evaluation protocols.
+B Recall–Precision Trade-off Analysis
+A common baseline strategy for improving recall
+in RAG systems is to increase the retrieval budget
+(larger top-k). However, this typically introduces
+substantial redundancy and noise. We compare
+this approach against NEST, which improves recall
+through Nested Evidence Survival (NES) without
+indiscriminate expansion.
+Table 4 reports Recall@50 and Redundancy Ra-
+tio on WebQuestions for increasing top- k values
+and for NEST under a fixed retrieval budget.
+Method Recall@50 ↑ Redundancy↓
+Vanilla RAG (k=20) 71.2 0.68
+Vanilla RAG (k=40) 77.9 0.74
+Vanilla RAG (k=80) 83.5 0.81
+NEST (k=20) 84.9 0.47
+Table 4: Recall–precision trade-off on WebQuestions.
+NEST achieves higher recall than Vanilla RAG
+with 4×retrieval budget, while substantially reduc-
+ing redundancy. This confirms that NEST improves
+recall structurally, rather than by retrieving more
+data.
+C Evidence Survival Profiles
+To make evidence survival interpretable, we ana-
+lyze how individual evidence units behave across
+nested retrieval scopes.
+Table 5 shows an example query from WebQues-
+tions: “Who discovered the element used in X-ray
+machines?”
+Evidence related to radium discovery is weakly
+ranked at coarse levels, but becomes highly salient
+under finer context. Static chunk-level retrieval
+prunes this evidence early, while NES allows it
+Evidence Chunk Doc Section Chunk
+General X-ray device description 3 12 ∅
+Radiation in early medicine 5 7 9
+Radium discovery (Curie) 11 4 2
+Imaging hardware overview 2 ∅ ∅
+Table 5: Example evidence survival profile across nested
+retrieval scopes. ∅ indicates the evidence was not re-
+trieved at that scope.
+to survive and be selected downstream. This il-
+lustrates how survival captures context-dependent
+relevance.
+D Robustness to Retrieval Noise
+We evaluate robustness by varying the size of the
+distractor corpus from 10M to 50M passages. Ta-
+ble 6 reports Recall@50 and EM on WebQuestions.
+Method 10M 50M
+Recall@50 EM Recall@50 EM
+Vanilla RAG 79.4 57.1 71.2 52.3
+DeepRAG 82.1 59.3 78.1 60.4
+NEST 88.3 62.1 84.9 62.8
+Table 6: Robustness to increasing retrieval noise.
+As noise increases, Vanilla RAG degrades
+sharply. NEST degrades more gracefully, indicat-
+ing that survival-based retrieval provides robust-
+ness under extreme noise.
+E Sensitivity to Nested Depth
+We analyze performance as a function of the num-
+ber of nested scopes. Table 7 reports EM and Re-
+call@50.
+Nested Levels Recall@50 EM
+1 (flat chunk) 75.8 54.1
+2 (doc →chunk) 81.6 59.4
+3 (doc →section →chunk) 84.9 62.8
+Table 7: Sensitivity to nested retrieval depth.
+Most gains arise from shallow nesting. This
+shows NEST does not rely on deep hierarchies and
+remains simple to deploy.
+F Comparison of Noise Removal
+Strategies
+We compare NR-MRR against alternative pruning
+strategies: random pruning, similarity-threshold
+pruning, and single-level reranking.
+514
+
+========== PDF PAGE 9 / 10 ==========
+Pruning Method EM Recall@50 Redundancy
+Random pruning 53.8 84.9 0.71
+Similarity threshold 57.2 81.1 0.58
+Single-level rerank 58.9 79.6 0.55
+NR-MRR 62.8 84.9 0.47
+Table 8: Comparison of evidence pruning strategies.
+NR-MRR uniquely preserves recall while reduc-
+ing redundancy, demonstrating the value of cross-
+level survival consistency.
+G Performance by Query Type
+We categorize WebQuestions queries intoexplicit
+entity and implicit/multi-hop types. Table 9 reports
+EM.
+Method Explicit Implicit
+Vanilla RAG 58.6 46.9
+DeepRAG 61.2 57.8
+NEST 63.4 61.9
+Table 9: Performance by query type (EM).
+NEST provides larger gains on implicit and
+multi-hop queries, supporting the claim that
+survival-based retrieval rescues context-dependent
+evidence.
+H Reproducibility and Implementation
+Details
+This section provides implementation-level details
+to facilitate reproducibility of NEST and to clarify
+that all reported results can be obtained without
+retriever fine-tuning, policy learning, or iterative
+LLM-based control.
+H.1 Deterministic Execution
+NEST is fully deterministic given: (i) a fixed re-
+triever, (ii) fixed retrieval budgets, and (iii) a fixed
+generator. No stochastic sampling, reinforcement
+learning, or learned controllers are used during re-
+trieval or selection.
+Nested Evidence Survival (NES) and NR-MRR
+operate solely on ranked retrieval outputs, making
+the pipeline reproducible across runs and hardware
+configurations.
+H.2 Hyperparameters and Defaults
+Unless otherwise stated, we use the following fixed
+hyperparameters across all experiments:
+• Number of nested scopes: L= 3
+• Retrieval scopes: document →section →chunk
+• Retrieval budget per scope: (K0,K1,K2) =
+(100,50,20)
+• Final evidence budget: k= 20
+• Retriever: BM25 + Contriever with λ= 0.4
+These values were chosen once based on valida-
+tion performance and held constant across datasets.
+H.3 End-to-End Pseudocode
+Algorithm 1 summarizes the complete NEST
+pipeline from query input to final evidence selec-
+tion.
+H.4 Computational Complexity
+Let Kℓ denote the retrieval budget at scope ℓ. The
+total retrieval and selection complexity is:
+O
+( L∑
+ℓ=0
+Kℓ + |Ccand|log |Ccand|
+)
+In practice, |Ccand| ≪∑
+ℓ Kℓ due to overlap
+across scopes. No pairwise similarity computation
+or cross-encoder inference is required.
+H.5 Implementation Notes
+• NEST can be implemented using any off-the-
+shelf dense or hybrid retriever.
+• No retriever re-indexing or corpus modification
+is required.
+• NR-MRR uses only rank information; embed-
+dings are not accessed during selection.
+• The pipeline is compatible with batch and stream-
+ing inference.
+These properties make NEST easy to integrate
+into existing RAG systems and suitable for real-
+world deployment.
+I Robustness Across Generators and
+Retrievers
+NEST is designed as a retrieval-time framework
+and does not rely on generator- or retriever-specific
+assumptions. We evaluate its robustness by vary-
+ing (i) the downstream LLM generator and (ii) the
+retrieval backbone, while keeping all other compo-
+nents fixed.
+515
+
+========== PDF PAGE 10 / 10 ==========
+I.1 Varying the Generator LLM
+We replace GPT-4-turbo with alternative genera-
+tors representing different model sizes and archi-
+tectures: GPT-3.5-turbo and LLaMA-2-13B. Ta-
+ble 10 reports EM on WebQuestions.
+Generator Vanilla RAG NEST
+GPT-3.5-turbo 49.6 56.8
+LLaMA-2-13B 51.1 59.4
+GPT-4-turbo 52.3 62.8
+Table 10: Generator robustness on WebQuestions (EM).
+NEST consistently improves factual accuracy
+across generators, including weaker models. This
+indicates that NEST improves evidence quality ,
+rather than compensating via generator capacity.
+I.2 Varying the Retriever Backbone
+We further replace the hybrid BM25+Contriever
+retriever with alternative dense retrievers: DPR
+and GTR-base. Table 11 reports Recall@50 and
+EM.
+Retriever Method Recall@50 EM
+DPR Vanilla RAG 73.4 50.8
+DPR NEST 82.7 59.6
+GTR-base Vanilla RAG 76.1 53.4
+GTR-base NEST 84.2 61.1
+Table 11: Retriever robustness on WebQuestions.
+NEST consistently improves recall and EM
+across retriever architectures, confirming that
+nested evidence survival is orthogonal to retriever
+choice and does not depend on specialized indexing
+or training.
+516

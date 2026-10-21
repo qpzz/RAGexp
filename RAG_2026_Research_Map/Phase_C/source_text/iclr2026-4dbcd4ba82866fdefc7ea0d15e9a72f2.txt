@@ -1,0 +1,1579 @@
+
+
+========== PDF PAGE 1 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+RESISTING CONTEXTUAL INTERFERENCE IN RAG VIA
+PARAMETRIC-KNOWLEDGE REINFORCEMENT
+
+  Chenyu Lin1,3∗           Yilin Wen1∗                Du Su2                        Hexiang Tan2
+  Fei Sun2                      Muhan Chen1            Chenfu Bao1,4†           Zhonghou Lyu1†
+ 1Baidu Inc.       2Institute of Computing Technology, Chinese Academy of Sciences
+ 3Nankai University       4Tsinghua University
+ chenyulin@mail.nankai.edu.cn,    {sudu,sunfei,tanhexiang21s}@ict.ac.cn
+ {wenyilin,chenmuhan01,baochenfu,lvzhonghou}@baidu.com
+ bcf25@mails.tsinghua.edu.cn
+                                                 ABSTRACT
+
+          Retrieval-augmented generation (RAG) improves performance on knowledge-
+          intensive tasks but can be derailed by wrong, irrelevant, or conflicting retrieved
+          text,causingmodelstorelyoninaccurateevidenceandcascadeerrors. Wepropose
+          Knowledgeable-R1, a reinforcement-learning framework that explicitly trains
+          large language models to use parametric knowledge (PK) to resist contextual
+          interference while still exploiting external context when it is reliably helpful.
+          Knowledgeable-R1 introduces a joint sampling scheme that generates paired re-
+          sponses with and without retrieval, and learns both local advantages (within each
+          decoding regime)and global advantagesunder the same inputto quantify when to
+          ignore misleading context versus adopt it. We employ an asymmetric advantage
+          transformation that amplifies exploratory behaviors toward parametric knowledge.
+          ExperimentsshowthatKnowledgeable-R1significantlyimprovesrobustnessand
+          reasoning accuracy in knowledge conflict scenarios and general RAG scenarios,
+          outperforming SOTA baselines by +22.89% in counterfactual scenarios, and with-
+          out degradation when the retrieved context is fully accurate. Datasets and code are
+          available at https://github.com/lcy80366872/knowledgeable-R1.
+
+1  I  NTRODUCTION
+
+Retrieval-augmented generation (RAG) has become a prominent approach for enhancing large
+language models (LLMs) by integrating contextual knowledge, thereby mitigating hallucinations
+and reducing factual errors (Nakano et al.,2021;Gao et al.,2023). However, recent studies indicate
+that when contextual knowledge is introduced, LLMs can become overly reliant on this external
+information, suppressing their internal parametric knowledge. This phenomenon, known as context
+dominance,isparticularlyevidentunderconditionsofnoisy,counterfactual,orinternallyinconsistent
+evidence(Suetal.,2024;Xieetal.,2024b;Shietal.,2023). Conflict-focusedevaluationsconfirm
+thatLLMsoftenadoptincorrectretrievedstatementsevenwhentheirparametricknowledgeiscorrect
+and can lag behind retrieval-free reasoning when retrieval is imperfect (Bi et al.,2025a;Wang et al.,
+2025a;Wen et al.,2024). These findings highlight an imbalance in how models utilize knowledge.
+A central challenge in Retrieval-Augmented Generation (RAG) systems is determining when to
+rely on contextual knowledge (CK) and when to revert to parametric knowledge (PK), as well as
+how to integrate the two in a stable and faithful manner. 1) Prompting approaches help guide the
+modeltovalidateorfilterthecontextwhilecombiningitwithparametricknowledge,whichimproves
+the coherence of the output (Ding et al.,2024;Cheng et al.,2024;Press et al.,2023;Wang et al.,
+2023;He et al.,2024;Wang et al.,2025a). 2) Decoding-based approaches, such as those proposed
+by (Bi et al.,2025b), adjust the token distribution during generation to mitigate conflicts between
+externalcontextandparametricknowledge. Whileeffectiveinsomescenarios,bothpromptingand
+decodingmethodsaddcomputationalcomplexityandlackageneralizabledecisionruleformanaging
+diverse contextual situations. 3) Fine-tuning methods, such as Self-RAG (Asai et al.,2024) and
+InFO-RAG(Xu et al.,2024), train LLMsto implicitly learndecision rules forknowledge utilization.
+However, these methods often require complex data annotation pipelines, which can limit flexibility
+and scalability.
+
+    ∗Equal contribution.    †Corresponding author.
+
+
+                                                        1
+
+========== PDF PAGE 2 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure1: OverviewofKnowledgeable-R1,whichintegratesparametric(blue)andcontextual(pink)
+samplingwithpolicyoptimizationto ensurerobustreasoningundermisleadingcontext. Green and
+red blocks indicate correct and incorrect responses, respectively. The inset chart displays accuracy
+on the ConFiQA-MC adversarial scenario (S2), where Knowledgeable-R1 (37.3%) significantly
+outperforms GRPO w/ RAG (19.7%), query-only prompting (25.8%), and RAG prompting (8.1%);
+see Table2.
+
+When contextual knowledge appears reliable but is actually incorrect, LLMs should ignore it and de-
+cidewhethertofallbackonparametricknowledge. Thisbehaviorisrarebutcrucial,ascurrentLLMs
+tendto relymore oncontextwhen facedwithconflicting ormisleading information. Reinforcement
+learning(RL)canassistbyadjustingtheprobabilityrankingsofoutputs,encouragingtheLLMto
+exploretheserarebutcriticaldecisions,suchaswhentofallbackonparametricknowledge(Stiennon
+et al.,2020;Ramamurthy et al.,2023). Therefore, we believe RL has the potential to help LLMs
+learn how to effectively balance and utilize both parametric and contextual knowledge. Recently,
+models like OpenAI-o1 (Jaech et al.,2024) and DeepSeek-R1 (Guo et al.,2025b) have employed RL
+techniques such as PPO (Schulman et al.,2017) and GRPO (Shao et al.,2024) to enhance LLMs’
+logical reasoning and problem-solving abilities through experience and feedback. However, in RAG
+systems, these methods are limited by their sampling space and objectives, which leads to a primary
+focus on context-aware reasoning while overlooking the importance of incorporating parametric
+knowledge.
+The goal of this work is to develop a reinforcement learning framework that explores both con-
+textual and parametric knowledge after retrieval input.  We call our method Knowledgeable-R1
+because it is a knowledge-aware reasoning approach that uses parametric knowledge to mitigate
+contextualinterferenceintheRAGsystem. Aconceptualoverviewofourframeworkispresented
+in Figure1.  Specifically,             Knowledgeable-R1 enables LLMs to (1) explore both parametric and
+contextual knowledge through joint sampling, (2) distinguish the relative merits of these two knowl-
+edge types using locally and globally defined advantages, and (3) mitigate penalties for less likely
+parametricoutputsbyapplyinganadaptiveasymmetricadvantagestransformation. Weconducted
+experiments across five scenarios, demonstrating thatKnowledgeable-R1 outperforms a range of
+RAG approaches by a significant margin. By effectively utilizing both parametric and contextual
+knowledge, Knowledgeable-R1 shows significant improvements in adversarial context settings,
+achieving +22.9% improvement over GRPO baselines in counterfactual scenarios (Table3) and
+a 30.47% improvement over original RAG prompting, while maintaining strong performance in
+reliable contexts.
+2  R  ELATED WORK
+2.1  L  IMITATIONS OF EXISTING RAG ROBUSTNESS METHODS
+RecentstudiesestablishthatLLMscanstoresubstantialparametricknowledge(PK),buttheirability
+to useexternalcontextual knowledge (CK) degrades undernoisy inputs. Many studies have analyzed
+this phenomenon and found that it may be caused by position biases (Liu et al.,2024;Hu et al.,
+2025) or interference when PK and CKconflict (Farahani etal.,2024). Theseobservations highlight
+the need for methods that can dynamically retain reliable PK when CK is misleading, while still
+leveraging CK when beneficial.
+A significant thread in RAG research focuses on robustness to irrelevant or adversarial passages.
+Methods include noise-injected training (Yoran et al.,2024), attention masking (Fang et al.,2024),
+
+
+                                                         2
+
+========== PDF PAGE 3 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+
+
+and adversarial filtering (Shi et al.,2024;Cohen-Wang et al.,2024). Evaluation benchmarks now
+systematicallystressconflictingevidencescenarios(Wangetal.,2025b;Tanetal.,2024). However,
+these approaches largely operate at the passage level through pre-retrieval filtering or post-retrieval
+weighting, lacking a mechanism to actively suppress harmful context during generation.  This
+limitation is particularly acute when misleading information appears plausible, as models tend to
+over-prioritizecontextevenwhenitcontradictstheirparametricknowledge(Farahanietal.,2024;
+Gao et al.,2023).
+
+2.2  R  EINFORCEMENT LEARNING FOR DECISION POLICIES IN LLM REASONING
+
+Beyond supervised fine-tuning, reinforcement learning (RL) has emerged as a powerful paradigm
+for shaping model behavior without extensive human annotation. Recent work demonstrates RL’s
+effectiveness in guiding reasoning processes, such as generating internal rationales (Zelikman et al.,
+2024;Li et al.,2025b) or stabilizing long chain-of-thought reasoning (Yu et al.,2025;Chen et al.,
+2025;Chengetal.,2025;Jinetal.,2025;Lietal.,2025a;Songetal.,2025). However,thesemethods
+primarily focus on reasoning structure rather than on parametric and contextual knowledge-aware
+learning for LLMs themselves.
+
+3  M  ETHOD
+
+Our objective is to enable a single language model toappropriately leverage parametric knowledge
+(PK)versuscontextualknowledge(CK)inretrieval-augmentedgeneration(RAG).Thekeychallenge
+lies in the varying reliability of retrieved context, which can be helpful, redundant, ormisleading. An
+ideal LLM should:
+•  Select the most accurate answer from its parametric knowledge when no context is provided
+   (parametric-only correctness).
+•  Selectthemostaccurateanswerfromitscontextualknowledgewhencontextisprovided(context-
+   aware correctness).
+•  Fall back on its correct parametric knowledge when faced with conflicting or noisy context,
+   ensuring robustness to misleading information (robustness to misleading context).
+Toachievethis,wepropose amulti-objectivereinforcementlearningframeworkthattrainsLLMsto
+simultaneously optimize these three goals.
+
+3.1  T  ASK DEFINITION
+
+We formulate the problem as a token-level reinforcement learning task. LetV  be the vocabulary,
+and let a promptx  be the input sequence. The prompt can be of two types: p, containing only the
+queryq, orp′, containingboththe queryq and aretrieved context passagec. Ateach decodingstept,
+the model (parameterized byθ) produces a probability distribution overV  based on the prompt and
+previously generated tokenso<t  :
+
+                                     π θ(ot|x,o <t ) =   softmax(fθ(x,o <t ))
+
+Thegoalistooptimizeθ suchthatthegeneratedsequenceo = (  o1,...,oT ) maximizestheexpected
+reward, which reflects answer correctness and appropriate knowledge utilization.
+
+3.2  T  HREE SAMPLING/DECODING POLICIES.
+
+Letp  denote the query-only prompt andp′ denote the query+context prompt. As we illustrate in
+Section1,GRPO usesa single samplingpolicyduring LLM training,making itdifficult for theLLM
+to explore parametric-aware answers in the combined retrieval input p′. In contrast, our method
+defines three distinct policies for each queryq over the next-token distributions:
+                           π θ(ot |p,o <t ),    π ′θ(o′t |p′,o′<t ),    ˆπ θ(ot |p′,o<t ).
+Notation. We useo to denote a token sequence generated when the current policy is conditioned
+on p  (query-only input), and o′ to denote a token sequence generated when the current policy is
+
+
+                                                          3
+
+========== PDF PAGE 4 / 22 ==========
+                                Published as a conference paper at ICLR 2026
+
+
+
+
+                                conditionedonp′(query+contextinput). Wewriteo<t   fortheprefixup tostept− 1,andot forthe
+                                token at stept. With these, the three policy types have the following inputs/outputs and intended
+                                behaviors:
+                                 •  PK (Parametric): inputp =   query, outputo (answer from parametric knowledge).
+                                 •  CK (Context-aware): inputp′ =   query+context, outputo′(answer using context).
+                                 •  RPK (Robust-PK): inputp′ =   query+context, outputo (answer consistent with PK).
+                                CKandRPKsharethesameinputp′buttargetdifferentbehaviors: CKexploitsreliablecontext;RPK
+                                staysonthePKtrajectorywhencontextisnoisy/conflicting. PKandRPKsharethesameoutputtype
+                                o, but are trained under different conditioning (without vs. with context). At inference, the model
+                                doesnotexplicitlyswitchcontrollers;thelearnedtokendistributionsencodewhentofollowcontext
+                                or implicitly revert to PK.
+                                Clarification on RPK sampling. RPK does not generate an independent answer. For each query, we
+                                firstsample aPKtrajectoryopk  = (  opk1  ,...,opkT  ) fromπ θ(·|p, ·) (query-only). IntheRPK branch,
+                                thesame tokensequenceopk  isused asthe target,but evaluatedunderthe query+contextpromptp′:
+                                at eachstept, wecomputeπ θ(opkt  |p′,opk<t ) and maximizeits log-probabilityunder theRPK reward.
+                                In other words, RPK re-evaluates the PK answer underp′and encourages the model to maintain PK
+                                tokens even when misleading context is present.
+
+                                                          Table 1: I/O and behavior of the three decoding policies.
+
+
+
+
+
+
+
+                                3.3  A  DVANTAGE CALCULATION WITH LOCAL AND GLOBAL NORMALIZATION
+
+                                Toeffectivelybalancethethreeobjectives,weintroduce anoveladvantagecalculationschemethat
+                                combines within-objective and cross-objective comparisons. The components are:
+                                 •  LocalAdvantage (within-policy,within-input): compares trajectoriesthatshare thesameinput
+                                   and the same output policy type.
+                                 •  Global Advantage (same input state, cross-output): compares CK and RPK trajectories underp′
+                                   in a unified pool, deciding whether touse context orfall back to PK-style decoding.
+                                Theglobaladvantagemechanismenableseffectivedifferentiationbetweengrouptrajectories,ensuring
+                                thatrewardscanstillcapturecross-sourcepreferences(CKvs. RPK)whenalltrajectorieswithina
+                                groupareuniformlygoodorbad. Thismaintainsmeaningfulfeedbackfordifferentknowledgetypes.
+                                Notation. RewardsR (·) are computed per trajectory based on answer correctness (e.g., EM). Let
+                                rewards be R  pki    for PK trajectories oi ∼  π θ(· |p, ·), R  ckj   for CK trajectories o′j ∼  π ′θ(· |p′,·),
+                                andR  rpki     for RPK trajectories ˜oi ∼   ˆπ θ(·|p′,·). Define theglobal (same-input) pool underp′ as
+                                U p′ =  {R  ckj }∪{  R  rpki  }.
+                                To address the "overcorrection" problem, when CK is reliable but slightly differs from PK (e.g.,
+                                whenfactualdetailslike anew capitalcityare updated),theLLM shouldtrustCK moredueto its
+                                timeliness. Thus, we design distinct advantages for PK, CK, and RPK.
+
+                                PK(Parametric).    TheadvantageofPKisdefinedasA i =  A  pk -locali          ,sincePKreliesonquery-only
+                                input:
+                                                                       A  pk -local      i  −  mean(   {R  pki })
+                                                                         i          =   R  pkstd( {R  pk
+                                                                                                   i })+  ε    .
+                                 This term encourages the query-only parametric answer to be as accurate as possible.
+                                CK(Context-aware).    Theadvantage ofCKisA ′j =  A  ck -localj          +  A  ck -globalj           ,combining bothlocal
+                                and global terms:
+
+
+                                                                                            4
+
+Policytype  Inputprompt        Outputtype                                    Intendedbehavior
+PK          p =  query            o∈ answerfromparametricknowledge  Parametric-onlyanswer
+CK          p′=  query+context o′∈ answerusingcontext                   Usecontextwhenhelpful
+RPK         p′=  query+context o∈ answerconsistentwithPK             FallbackPKanswerundermisleadingcontext
+
+========== PDF PAGE 5 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+
+
+
+                 A  ck -localj          =   R  ckj  −  mean(   {R  ckj })std( {R  ckj })+  ε    ,    A  ck -globalj           =   R  ckj  −  mean(   U p′)std( U p′)+  ε    .
+
+RPK (Robust-PK under Context).    The advantage of RPK is defined as ˆA i =    ˆA  globali       .  RPK
+focuses solely on theglobal comparison under the same inputp′:
+
+                                          ˆA  global     i   −  mean(   U p′)
+                                           i       =   R  rpkstd( U p′)+  ε     .
+
+Summary. PK has a local advantage, ensuring accuracy based on the query input. CK combines
+both local and global advantages, prioritizing context when both knowledge types are correct, as
+contextisfrequentlyupdated andmorereliable. RPKhasonly aglobaladvantage,comparingPK’s
+performanceinthesameinputp′tomaintainitasafallbackwhencontextismisleading. Thisbalance
+ensures the model uses context effectively without over-relying on it when PK is more reliable.
+
+3.4  K  NOWLEDGE BALANCE MODULATION
+
+Duringtraining,context-aware(CK)pathsoftengethigherrewardsthanrobustparametricknowledge
+(RPK) paths due to the usefulness of retrieved contexts, creating a bias towards context. This can
+make themodelrely toomuch onCKand weakenits abilityto useparametricknowledgein noisy
+or conflicting situations. To address this, we introduce an asymmetric advantage transformation for
+RPK paths, reducing the penalty whenPK-based decoding is slightly worse than context-following,
+ensuring parametric knowledge remains a viable fallback.
+We define a modulation functionT  that transforms the RPK advantages ˆA i:
+                                                      (  ˆA i,         if ˆA i >  0,
+                                       T ( ˆA i;β ) =    β · ˆA i,   if ˆA i ≤  0,
+
+
+whereβ ∈  [0.01 ,1] isamodulationcoefficient. Whenβ <   1,negativeadvantages(indicatingpoor
+performanceofPKdecoding)arereduced,makingthemodellesssensitivetooccasionalmistakes
+when relying on parametric knowledge.
+To dynamically balance the exploration of parametric and contextual knowledge, we adaptβ  during
+training based on the relative performance of CK and RPK trajectories. LetB  denote the current
+mini-batch of training examples. We compute the total advantage for each knowledge type:
+                      S ck  =  X     A ′j,    S rpk+    =   X     ˆA i,    S rpk −  =   X      ˆA i,
+
+                              j∈B  ck                   i∈B  rpk+                    i∈B  rpk −
+
+where B ck   is the set of CK trajectories, B rpk+     is the subset of RPK trajectories with positive
+advantages, andB rpk −  is the subset with non-positive advantages.
+We then updateβ  to maintain balance between the two knowledge sources:
+                                                    S ck −  S rpk+
+                                      β ←   clip         S rpk −      ,0.01 ,1   ,
+
+Theupdateruleadjuststhepenaltycoefficientβ  basedontheperformancegapbetweencontext-aware
+(CK)androbustparametricknowledge(RPK).WhenCKoutperformsRPK,β  decreases,reducing
+penaltiesfornegativeRPKadvantagesandencouragingmoreexplorationofRPK.Asthegapnarrows,
+β  increases, making RPK training more cautious.
+Whencontextishighlybeneficial(i.e.,S rpk −  ismuchlargerthanS rpk+   ),reducingpenaltiesforpoor
+RPK performance (β  decreases) allows the model to keep RPK as a fallback option. This method,
+similar to reward shaping (Ng et al.,1999;Devlin et al.,2011), ensures that parametric knowledge
+staysusable. Italsoresemblesfocusedexplorationtechniques(Schulmanetal.,2015;Espeholtetal.,
+2018) that prevent forgetting learned behaviors. While this introduces some bias in the gradient
+estimates,ithelpsbalancethemodel’stendencytoover-relyonhelpfulcontextfromthetrainingdata,
+allowing it to resist misleading context when needed.
+
+
+                                                           5
+
+========== PDF PAGE 6 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+
+
+3.5  P  OLICY OPTIMIZATION
+
+We adopt PPO-style updates with clipping. For each trajectory, we compute the probability ratio
+between the current and old policies:
+
+
+ rPKi,t  =    π θ(oi,t |p, o i,<t  )π θold (oi,t |p, o i,<t  ),    rCKj,t   =    π ′θ(o′j,t |p′, o′j,<t  )π ′θold (o′j,t |p′, o′j,<t  ),    rRPKi,t     =     ˆπ θ(oi,t |p′, oi,<t  )ˆπ θold (oi,t |p′, oi,<t  ).
+
+
+where(x,o t) are the corresponding prompts and tokens.
+The objective for each component is defined as follows:
+
+
+                                n  pkX|oi|X     h                                              i
+                J PK   =    1n pk         min    rPKi,t  A i, clip( rPKi,t , 1 −  ϵ, 1+   ϵ)A i ,
+                                i=1  t=1
+                                n  ckX|o′j|X    h                                              i
+                J CK   =    1n ck         min    rCKj,t  A ′j, clip( rCKj,t , 1 −  ϵ, 1+   ϵ)A ′j,                        (1)
+                                j=1  t=1
+                                n  pkX|oi|X     h                                                           i
+               J RPK     =    1n pk       min    rRPKi,t    T ( ˆA i), clip( rRPKi,t   , 1 −  ϵ, 1+   ϵ)T ( ˆA i).
+                                i=1  t=1
+The total objective is the weighted sum of the individual objectives:
+                                    J (θ) =   λ pk J PK   +  λ ck J CK   +  λ rpk J RPK                                              (2)
+withλ pk  =  λ ck  =  λ rpk   = 1  .0 in our experiments. We useϵ = 0  .2 for clipping.
+Thegoalofourmethodistooptimizeθ tomaximizesJ (θ),thefulltrainingprocedureisoutlinedin
+Algorithm1in AppendixL.
+
+4  E  XPERIMENTS
+
+We evaluate whether the model can leverage parametric knowledge to produce accurate answers
+despiteexternal contextual interference, and remain robust when context knowledge is correct.
+
+4.1  E  XPERIMENTAL SETUP
+
+We test robustness under five contextual conditions with increasing difficulty: Scenario I (S1):
+Correctcontextualknowledge(Section4.2.1);                      ScenarioII(S2): Adversarialcontextualknowledge
+(Section4.2.1);                      ScenarioIII(S3): Self-conflictingcontextualknowledge(Section4.2.1);                      Scenario
+IV (S4):  Irrelevant contextual knowledge (Section4.2.1);                       Scenario V (S5):  Partially relevant
+contextualknowledge(Section4.2.1). Thesescenariosreflectreal-worldretrievalsituationswhere
+irrelevant or conflicting context can mislead generation.
+
+4.1.1  R  EASONING INSTRUCTION AND BASELINES
+We evaluate with Qwen2.5-3B-Instruct, Qwen2.5-7B-Instruct, Qwen2.5-14B-Instruct and
+Llama3.1-8B-Instruct. Baselinesinclude query-only prompting, RAG prompting, Astute-RAG (a
+promptingmethodfor imperfectretrieval(Wangetal.,2025a)),CK-PLUG(Biet al.,2025c),SFT,
+and GRPO (Guo et al.,2025a) with RAG. We evaluate using exact match (EM) (Jin et al.,2025).
+To ensure fairness, all methods use the same total training data and are trained for one epoch. For
+GRPOandKnowledgeable-R1,weuseaglobalbatchsizeof128,arolloutbatchsizeof32,arollout
+temperatureof1,andalearningrate of1 ×  10 − 6. Allexperimentsrunon8H100GPUs, using the
+samesystem promptfor bothtraining andinference, wherethe inferenceinput combinesthe query
+and context. For further experiment details, see AppendixI,J, andK.
+Baselineclarifications. CK-PLUG(Bietal.,2025c)isaplug-and-playdecodingmethodthatdetects
+knowledgeconflictsviaconfidencegainandadjuststokenprobabilitiesforconflictspans,enabling
+
+
+                                                              6
+
+========== PDF PAGE 7 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+
+
+fine-grained control over parametric vs. contextual reliance. GRPO w/ RAG trains only the CK
+objectivewithquery+contextrollouts(noPK/RPKbranches),usingthesamenumberoftotalrollouts
+asKnowledgeable-R1. SFTisastrongfine-tuningbaselinetrainedonthesamemixtureofgood/bad
+context data as Knowledgeable-R1, with explicit conflict-handling instructions. Our method splits
+rollouts into PK, CK,and RPKgroups; roughlyhalf therollout budgetis allocatedto query-onlyPK
+trajectories, making the two methods directly comparable.
+
+4.1.2  D  ATASETS
+WeintroduceKnowQAtotestmethodsacrossthefivescenarios. First,wetestparametricknowledge
+using query-only prompts (AppendixH), where a correct answer means the model has the relevant
+PK. Then, we create contextual inputs using the top-5 retrieved paragraphs. This method is suitable
+forknowledge-intensivetasks. KnowQAincludesscientific,factual,andcommonsensequestions,
+organized by scenario:
+•  Correct and Wrong Context.  We adapt PC (PC-QA, PC-MR, PC-MC) and NC (NC-QA,
+   NC-MR, NC-MC) from ConFiQA (Xie et al.,2024a) for supporting vs. opposing evidence.
+   QA stands for single-hop QA, MR for multi-hop reasoning, and MC for multiple conflicting
+   inputs. We check the correctness of the context by looking for made-up sources. ConFiQA is a
+   counterfactual-retrieval benchmark with three sub-datasets (QA/MR/MC).
+•  Conflict Context.  We create SC from ConFiQA using conflicting evidence and test whether
+   models can handle contradictions by showing both positive and negative examples together.
+•  IrrelevantContext. WeuseExplainPE(Wenetal.,2024),amedicalQAdatasetfromtheChinese
+   NationalLicensedPharmacistExamination. Itteststheimpactofknowledgemismatchesonmodel
+   performance, where adding retrieved documents canlower accuracy compared to query-only.
+•  PartlyIrrelevantContext. WeuseHotpotQA(Yangetal.,2018),              2WikiMultiHopQA(Hoetal.,
+   2020), and        MuSiQue(Trivedi et al.,2022), which include valid evidence mixed with distractors.
+4.1.3  R  ETRIEVAL SETUP
+
+Weusedataset-providedcontextswithoutanyadditionalretriever. Thecontexts(includingbothcorrect
+and incorrect passages) are directly taken from the benchmark construction, without re-indexing
+or re-retrieval froma larger corpus. We adopt thetop-5 paragraphsprovidedby thesebenchmarks,
+preserve their original order, and only truncate when the backbone model’s maximum length is
+exceeded. For ConFiQA training, correct and incorrect contexts are mixed in equal proportion.
+
+4.2  E  XPERIMENTAL RESULTS
+
+We evaluate Knowledgeable-R1 in various contexts and find that it effectively selects reliable
+evidence while ignoring misleading or irrelevant information, especially when parametric knowledge
+(PK) is sufficient. This leads to significant improvements in challenging interference settings (S2-
+S5) without harming performance in correct contexts (S1). Consistent results are observed across
+models of different sizes (3B, 7B, 8B, 14B), with detailed results for Qwen2.5-7B-Instruct and
+Llama3.1-8B-Instruct in Tables2and3, andsimilar patterns forother models(see AppendixM).
+Our experimental analysis highlights three key strengths ofKnowledgeable-R1:
+•  RobustnesstoIncorrectContext. Significantimprovementsinadversarial(S2),conflicting(S3),
+   and irrelevant (S4) settings demonstrate the method’s ability to handle unreliable context.
+•  Preservation of Correct Context Benefits. No performance drop occurs when the context is
+   accurate (S1), keeping it competitive with context-specific baselines.
+•  Effective Context Selection. Large gains on PK-answerable questions, particularly in mixed-
+   context scenarios(S5), highlight the method’s abilityto filter relevant from irrelevant information.
+
+4.2.1  P  ERFORMANCE ACROSS CONTEXTUAL SCENARIOS
+
+Scenario   I:   Correct   Contextual   Knowledge   (S1).    When   given   accurate   evidence,
+Knowledgeable-R1  keeps  the  performance  improvements  from  correct  context.    As  shown
+in Table2(left columns), for          Qwen2.5-7B-Instruct, Knowledgeable-R1 achieves 80.90% on
+PC-QA and 75.51% on PC-MC, staying competitive with the best baseline (GRPO w/ RAG).
+Similarly, for Llama3.1-8B-Instruct, it reaches 80.03% on PC-QA and 80.24% on PC-MC.
+
+
+                                                         7
+
+========== PDF PAGE 8 / 22 ==========
+                                  Published as a conference paper at ICLR 2026
+
+
+
+
+                                  Table 2: Overallaccuracy across fivecontextualscenarios: correct(S1),wrong(S2),conflict (S3),
+                                  irrelevant (S4), and partly-irrelevant (S5). Best results are in bold, second best are underlined. The
+                                  "improve" row shows gains over RAG prompting.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                  Theseresultsshowthatlearningtomanagenoisycontextsdoesn’treducetheuseofreliableevidence,
+                                  addressing a key concern in robust RAG systems.
+                                  Scenario II: Adversarial Contextual Knowledge (S2).    This scenario highlights the weaknesses
+                                  of naive RAG and the benefits of our method.  When the context is adversarial, RAG prompt-
+                                  ing causes a huge drop in performance—down to    13.47%/8.06%/11.31% (NC-MR/MC/QA) on
+                                  Qwen2.5-7B-Instruct, much lower than the query-only baseline.  Knowledgeable-R1 greatly im-
+                                  provesthis,increasingperformanceby+30.47/+29.28/+18.09percentagepointsandoutperforming
+                                  GRPOw/RAG(e.g.,43.94%vs. 26.94%onNC-MR).Theconsistentgainsof+32.49/+24.84/+19.71
+                                  onLlama3.1-8B-Instructsuggestthatthemethodeffectivelylearnstoignoremisleadingevidence
+                                  and rely on parametric knowledge when needed.
+                                  ScenarioIII: Self-ConflictingContextual Knowledge(S3).   Whenthe contexthas internalcon-
+                                  tradictions,Knowledgeable-R1performscompetitively: 76.33%comparedto75.33%forGRPO
+                                  w/ RAG on Qwen2.5-7B-Instruct, and 73.67% compared to 76.58% on llama3.1-8B. Though
+                                  theimprovementsaresmall,theconsistentgainsacrossmodelsshowstablehandlingofconflicting
+                                  information. Resolving contradictions within thecontext seems difficult for all methods, indicating
+                                  an area for future improvement.
+                                  ScenarioIV: Irrelevant ContextualKnowledge (S4).   Inthe ExplainPE benchmark,where the
+                                  contextiscompletelyunrelated,weseethetypical"RAG-hurt"effect: query-only(64.45%)performs
+                                  better than RAG prompting (62.21%) on Qwen2.5-7B-Instruct.  Knowledgeable-R1 achieves
+                                  67.57%,activelyrejectingirrelevantcontextandoutperformingbothmethods. Thisshowsthatthe
+                                  method can recognize when context isn’t helpful for the query.
+                                  Scenario V: PartiallyRelevant ContextualKnowledge(S5).    When valid evidence ismixed with
+                                  distractors,Knowledgeable-R1performsstrongestornearlystrongest. OnQwen2.5-7B-Instruct,
+                                  itachieves31.45%onHotpotQA,37.52%on2WikiMultiHopQA,and12.04%onMuSiQue,with
+                                  significantgainsoverRAGprompting. Notably,thestrongperformanceon2WikiMultiHopQA
+                                  and MuSiQue is achieved without fine-tuning on these datasets, showing that the method can
+                                  generalizetonewevidencetypesanddistractorpatternsbeyondthetrainingdata(HotpotQA).This
+                                  abilitytogeneralizeacrossdatasetsisespeciallyusefulforreal-worldapplications,wheretheevidence
+                                  may differ from the training data.
+
+                                  4.2.2  A  NALYSIS ON PARAMETRIC-KNOWLEDGE ANSWERABLE SUBSET
+
+                                  We define the parametric-knowledge answerable subset as questions where the model provides
+                                  correct answers using query-only prompting, showing that it has enough parametric knowledge.
+                              Correct(S1)                    Wrong(S2)            Conflict(S3)  Irrelevant(S4)         PartlyIrrelevant(S5)When focusingon thissubset, allmethods improve,but Knowledgeable-R1 showsthe biggestgains
+                                  when the context is wrong or mixed (Table3). Specifically, on NC-MR, NC-MC, and NC-QA, our
+Method                       PC-MR  PC-MC   PC-QA  NC-MR   NC-MC   NC-QA        SC          ExplainPE    HotPotQA     2Wikimethod achieves an average improvement of 22.89% over GRPO w/ RAG.MultiHopQA  Musique
+
+Qwen2.5-7B-Instruct
+Query-onlyprompting        27.72%   24.66%   31.67%   25.93%   25.82%   32.31%     29.67%         64.45%       20.90%      25.54%      4.36%
+RAGprompting               65.68%   66.39%   74.35%   13.47%    8.06%    11.31%     59.50%         62.21%       20.36%      22.53%      6.41%8
+CK-PLUG(Bietal.,2025b)  64.69%   66.55%   78.66%   11.62%    8.06%    7.92%      55.00%         55.00%       22.74%      24.76%      6.25%
+Astute(Wangetal.,2025a)   65.51%   66.05%   77.62%   12.79%    7.07%    10.34%     54.20%         56.74%       17.87%      20.35%      6.29%
+SFT                           71.95%   77.70%74.70%   24.92%   21.05%21.97%     68.50%         66.60%30.14%     32.20%     11.75%
+GRPOw/RAG               77.56%  77.36%  80.03%  26.94%   19.74%   26.01%    75.33%       66.50%       27.93%      33.95%  11.79%
+Knowledgeable-R1           75.08%75.51%  80.90%  43.94%   37.34%   29.40%     76.33%        67.57%       31.45%      37.52%     12.04%
+improve                +9.41%   +9.12%  +6.54%  +30.47%  +29.28% +18.09%    +15.92%      +5.36%     +11.09%    +14.99%    +5.63%
+Llama3.1-8B-Instruct
+Query-onlyprompting        29.37%   26.18%   39.93%   27.10%   27.63%   42.65%     32.08%         43.26%       20.69%      21.02%      6.16%
+RAGprompting               64.85%   61.99%   76.42%   22.90%   16.28%   24.88%     61.17%         39.16%       24.44%      23.50%      8.19%
+CK-PLUG(Bietal.,2025b)  54.79%   58.45%   69.71%   12.12%    9.05%    17.29%     42.00%         31.54%       22.35%      24.63%      5.25%
+Astute(Wangetal.,2025a)   65.84%   64.86%   77.97%    17%     9.05%    17.29%     59.83%         40.14%        1.65%       30.26%      9.64%
+SFT                           72.88%   79.22%   73.84%   42.59%35.53%   35.86%     70.12%         47.17%       33.59%      38.24%     13.36%
+GRPOw/RAG               78.05%  79.73%  82.62%  41.58%   35.69%   39.26%    76.58%         47.56%    34.84%     41.22%    16.59%
+Knowledgeable-R1           73.76%  80.24%  80.03%  55.39%   41.12%   44.59%     73.67%   49.61%       37.06%      45.37%     14.69%
+improve                +8.91%  +18.25%  +3.61%  +32.49%  +24.84% +19.71%    +15.41%      +10.45%    +12.62%    +21.87%    +6.50%
+
+========== PDF PAGE 9 / 22 ==========
+                                       Published as a conference paper at ICLR 2026
+
+
+
+
+                                       Table3: Accuracyon theparametric-knowledgeanswerable subsetacross allscenarios. Best results
+                                       are inbold, second best are underlined.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                       Table 4: Ablationstudy of Knowledgeable-R1 components. TITE: Bothparametric andcontextual
+                                       knowledgecorrect;TIFE:parametriccorrect,contextualwrong;FITE:parametricwrong,contextual
+                                       correct; FIFE: Both wrong. Best results are inbold, largest performance drops are underlined.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                       For  Qwen2.5-7B-Instruct,  Knowledgeable-R1  achieves  89.61%/79.62%/66.00%  on  NC-
+                                       MR/MC/QA,significantlyoutperformingRAGprompting(32.47%/19.75%/28.50%)andGRPO
+                                       w/ RAG (57.61%/46.50%/62.50%). Consistent trends are observed for Llama3.1-8B-Instruct.
+                                       Theseresultsconfirm thatourmethodeffectivelyidentifieswhen parametricknowledgeis reliable,
+                                       allowingittoignoreconflictinginformationwhilemaintainingstableperformanceincorrectcontexts
+                                       (S1).
+                                       Significant improvements are observed in Scenario V (partially relevant context). On HotpotQA,
+                                       Knowledgeable-R1 achieves 78.49% vs. 66.54% (GRPO w/RAG)using Qwen2.5-7B-Instruct,
+                                       and 83.55% vs.  73.17% using Llama3.1-8B-Instruct.  This indicates that the learned policy
+                                       effectively identifies useful evidence while filtering out distractions.
+
+                                       4.2.3  A  BLATION STUDIES
+                                       We conduct ablation studies on Qwen2.5-7B-Instruct to evaluate the contribution of each compo-
+                                       nent(Table4). ThelargestperformancedropsoccurinTIFE(parametriccorrect,contextincorrect)
+                                       scenarios, highlighting the importance of each component in handling misleading context.
+
+                                       Multi-objectiveand Multi-samplingStrategy.   WeassessPK, CK,and RPKpolicies. Removing
+                                       the parametric objective (J PK   ) results in moderate drops, particularly in FIFE scenarios (-1.11% for
+                                       MC,-2.14%forQA).Themostsignificantdegradationoccurswhentherelativeparametricreward
+                                       (J RPK    )isremoved,causingcatastrophiclossesinTIFEscenarios(-33.12%forMC,-3.50%forQA).
+                                       This confirmsJ RPK     is crucial for robustness under contextual interference.
+
+                                       Local and Global Advantages.   Removing A ck − local   causes significant performance drops in
+                                       context-answerablescenarios,while removingA ck − global   reducesTIFE performance. This suggests
+                                 Correct(S1)                           Wrong(S2)                Conflict(S3)   Irrelevant(S4)             PartlyIrrelevant(S5)local advantages boost respective types (e.g., CK performs better when context is correct), while
+Method                              PC-MR    PC-MC   PC-QA    NC-MR    NC-MC    NC-QA          SC             ExplainPE      HotPotQA        2WikiPC-MR&NC-MR                                               PC-QA&NC-QA
+                                                                                                                             MultiHopQA   Musique
+Method                                                             TITE       TIFE       FITE       FIFE        Avg.        TITE       TIFE       FITE       FIFE        Avg.
+Qwen2.5-7B-Instruct                                                                                              9
+RAGprompting                    85.71%    86.99%   94.02%    32.47%     19.75%     28.50%       87.08%            83.64%48.84%         41.16%       20.75%
+Knowledgeable-R1                               95.21%    79.62%    69.06%    22.62%     65.40%    97.83%    66.00%    73.05%    11.93%    62.12%
+CK-PLUG(Bietal.,2025b)    79.76%    83.56%   95.65%    29.87%     18.47%     18.50%       82.87%            77.58%          55.30%         42.78%       20.75%
+Multi-objectiveandmulti-samplingstrategy
+Astute(Wangetal.,2025a)     86.31%    87.67%   92.39%    31.17%     19.11%     24.50%       81.18%            73.03%          41.73%         34.50%       20.75%
+GRPOw/RAG                    93.21% 93.15%   97.28%    57.61%    46.50%    62.50%      93.54%        84.39%          66.54%    55.42%      45.28%
+Knowledgeable-R1-JPK                                   95.89%   75.80%   69.06%   21.51%    64.42%97.83%   66.00%   72.04%    9.79%     61.30%
+Knowledgeable-R1              95.83%   95.21%   97.83%   89.61%    79.62%    66.00%       96.07%           83.18%          78.49%        66.72%       66.98%
+Knowledgeable-R1-JPK    -JRPK      (GRPO)   93.15%   46.50%   72.20%   10.42%    55.60%    97.28%   62.50%   72.04%    8.59%     60.07%
+improve                   +10.12%   +8.22%   +3.81%   +57.14%   +59.87%   +37.50%      +8.99%         -0.46%      +29.65%      +25.56%     +46.23%
+Localandglobaladvantages
+Llama3.1-8B-Instruct
+Knowledgeable-R1-A ck− local                        96.58%   82.80%   66.82%   18.63%    64.69%    97.28%   64.50%   68.77%    9.07%     59.91%
+RAGprompting                    89.89%    87.74%   96.98%    52.17%     37.50%     48.48%       87.01%            67.95%          55.16%         39.92%       34.90%
+Knowledgeable-R1-A ck− global                       93.15%   66.88%   71.75%   14.41%    60.95%    97.28%   54.00%   73.80%    7.64%     58.18%
+CK-PLUG(Bietal.,2025b)     80.90%    82.58%   90.09%    30.43%     21.43%     32.58%       67.01%            44.24%          49.15%         42.79%       16.11%
+Astute(Wangetal.,2025a)     91.01%    89.03%   97.41%    35.40%     20.24%     33.33%       83.12%            70.20%           3.12%         52.25%       35.57%
+Knowledgebalancemodulation
+GRPOw/RAG                    96.07%    94.19%   98.71%    72.67%     71.43%     70.83%       94.81%            74.94%          73.17%68.94%61.74%
+Knowledgeable-R1-adaptβ                             93.15%   52.23%   72.65%   10.20%    56.95%    96.74%   53.50%   74.56%    6.21%     58.02%
+Knowledgeable-R1               94.38%    93.55%   98.71%    88.82%     75.60%     81.82%       96.62%           78.10%         83.55%        81.69%       71.14%
+improve                    +4.49%   +5.81%   +1.73%   +36.65%   +38.10%   +33.34%      +9.61%        +10.15%      +28.39%      +41.77%     +36.24%
+
+========== PDF PAGE 10 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+
+
+globaladvantagesoptimizetheoverallknowledgebalance. FurtherablationinAppendixBshowsthe
+framework is robust to the local-global ratio choice.
+
+Knowledge Balance Modulation.   Adaptive β  modulation is vital; fixed β  reduces TIFE per-
+formance by 27.39% (MC) and 12.50% (QA). The drop in FIFE scenarios further highlights the
+effectiveness of adaptive balancing when both knowledge sources are unreliable. Together, these
+components work synergistically to enable robust reasoning in challenging scenarios.
+
+4.3  A  DDITIONAL ANALYSIS
+
+Inthissection,weinvestigateperformancetrade-offs,robustness,andthedynamicbehaviorofour
+framework.
+Knowledge Balance. A critical component of Knowledgeable-R1 is the adaptiveβ  modulation. As
+shown in Table5, the adaptive balancing scheme significantly outperforms any single fixed       β  value
+acrossdifferentdatasetswithoutrequiringper-datasettuning. Fixedvaluesoftencreateatrade-off:
+a lowβ  might favor parametric knowledge but hurt contextual reasoning, while a highβ  does the
+opposite. Dynamically adjusting thisbalance based on predictionconfidence ensures robust handling
+of conflicting information.  Furthermore, during training,β  rapidly converges to a stable regime
+(stabilizingat 0.01within 8steps onConFiQA,see AppendixA), indicatingthat thepolicy quickly
+learns to shield parametric knowledge from unreliable contexts.
+
+Table 5: β  sensitivity study: fixedvs.adaptive. Adaptiveβ  achievesbest-or-near-bestacrosstasks
+without per-dataset tuning.
+
+                                     β                                  MC-avg     QA-avg
+                                     0.01                             56.03%      52.83%
+                                     0.2                               52.74%      52.53%
+                                     0.5                               51.19%      52.63%
+                                     0.8                               48.22%      51.75%
+                                     1.0                               48.05%      52.52%
+                                     Adaptiveβ  (ours)     56.43%     54.85%
+
+Robustnessto DataandWeights. Acommonconcernis whetherthemodeloverfits tothe"noise
+ratio" of the training data.  However, even when trained on 99% correct context (only 1% bad),
+Knowledgeable-R1 still outperforms GRPO on S2 scenarios (AppendixE), proving it learns a
+genuine decision boundary rather than relying on dataset statistics. Additionally, regarding the S1
+(correct context) performance gap compared to GRPO w/ RAG, ablations show this is tunable via
+theJ CK    weight. Increasingitsweight(e.g.,ratio1:2:1)closestheS1gapwhilepreservingmostS2
+advantages (AppendixC), demonstrating a controllable Pareto front between contextual compliance
+and parametric safety.
+
+5  C  ONCLUSION
+Inthis work,we presentedKnowledgeable-R1,a principledreinforcement learning frameworkthat
+systematicallyaddressesthechallengesofknowledgeintegrationinretrieval-augmentedgeneration.
+Byemployingajointsamplingstrategy andasymmetricpolicyoptimization,ourapproachenables
+models to effectively distinguish between reliable external context and internal parametric knowl-
+edge. Extensive benchmarking across diverse scenarios highlightsthat Knowledgeable-R1 achieves
+superiorrobustnessagainstcontextualinterference,particularlyinadversarialandconflictingsettings,
+while preserving competitive performance on standard RAG tasks. These results underscore the
+potential of reinforcement learning for calibrating knowledge utilization. Future work will explore
+the scalability of this approach to more complex multi-source retrieval environments and investigate
+the integration of diverse exploration cues to further enhance model reasoning and grounding.
+
+
+
+
+
+
+
+                                                          10
+
+========== PDF PAGE 11 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+
+ETHICS STATEMENT
+
+We confirm that this work aligns with the ICLR Code of Ethics. We have considered potential ethical
+aspects,includingtheuseofpublic datasetsincompliancewiththeirlicenses,thebroadersocietal
+impactofour research, andpotentialbiasesinour methodology. Tothebestofourknowledge,this
+work raises no immediate ethical concerns, and we declare no conflicts of interest.
+
+REPRODUCIBILITY STATEMENT
+
+Tofacilitatethereproducibilityof ourwork,wehavemadethe followingavailable: (1)the source
+code of our algorithm, which conducts training using the VERL framework (Sheng et al.,2025),
+along with supplementary materials; (2) complete experimental configurations inJ. Additionally, a
+detailedaccountofthedatapre-processingproceduresforthedatasetsinSection4.1.2canbefound
+inJ.
+
+LIMITATIONS
+
+Our method introduces a reinforcement learning framework to address knowledge conflicts in
+large languagemodels (LLMs), focusingon theautomatic integration ofparametric andcontextual
+knowledge through sampling and policy optimization. In Sections S3 and S5, we evaluate scenarios
+withmixed-contexttypes. However,theerrorsinthecontextfromSectionS5havenotbeenanalyzed
+insufficientdetail. Forexample,whentheamountofconflictingevidencechanges(e.g.,1incorrect
+result vs.  4 incorrect out of 5 retrieved), it’s unclear how the sensitivity of Knowledgeable-R1
+to parametric knowledge is affected. Future research should explore more complex scenarios and
+conductexperimentstounderstandhowthemodelrespondstodifferentlevelsofconflictandevidence
+reliability.
+
+REFERENCES
+
+Akari Asai, Zeqiu Wu, Yizhong Wang, Avi Sil, and Hannaneh Hajishirzi.  Self-rag: Learning to
+  retrieve, generate, and critique through self-reflection. InInt. Conf. Learn. Represent., 2024.
+Baolong Bi, Shaohan Huang, Yiwei Wang, Tianchi Yang, Zihan Zhang, Haizhen Huang, Lingrui
+  Mei, Junfeng Fang, Zehao Li, Furu Wei, Weiwei Deng, Feng Sun, Qi Zhang, and Shenghua
+  Liu. Context-DPO:Aligninglanguagemodelsforcontext-faithfulness. InWanxiangChe,Joyce
+  Nabende, Ekaterina Shutova, and Mohammad Taher Pilehvar (eds.), Proc. Annu. Meet. Assoc.
+  Comput Linguist., pp. 10280–10300, July 2025a. ISBN 979-8-89176-256-5.
+BaolongBi,ShenghuaLiu,YiweiWang,YilongXu,JunfengFang,LingruiMei,andXueqiCheng.
+  Parameters vs. context: Fine-grained control of knowledge reliance in language models. arXiv
+  preprint arXiv:2503.15888, 2025b.
+BaolongBi,ShenghuaLiu,YiweiWang,YilongXu,JunfengFang,LingruiMei,andXueqiCheng.
+  Parameters vs. context: Fine-grained control of knowledge reliance in language models, 2025c.
+Qiguang Chen, Libo Qin, Jinhao Liu, Dengyun Peng, Jiannan Guan, Peng Wang, Mengkang Hu,
+  Yuhang Zhou, Te Gao, and Wanxiang Che. Towards reasoning era: A survey of long chain-of-
+  thought for reasoning large language models. arXiv preprint arXiv:2503.09567, 2025.
+SitaoCheng,LiangmingPan,XunjianYin,XinyiWang,andWilliamYangWang. Understandingthe
+  interplaybetweenparametricandcontextualknowledgeforlargelanguagemodels. arXivpreprint
+  arXiv:2410.08414, 2024.
+Zhoujun Cheng, Richard Fan, Shibo Hao, Taylor W Killian, Haonan Li, Suqi Sun, Hector Ren,
+  AlexanderMoreno,DaqianZhang,TianjunZhong,etal. K2-think: Aparameter-efficientreasoning
+  system. arXiv preprint arXiv:2509.07604, 2025.
+Benjamin Cohen-Wang, Harshay Shah, Kristian Georgiev, and Aleksander Madry.  Contextcite:
+  Attributing model generation to context. Adv. Neural Inform. Process. Syst., 37:95764–95807,
+  2024.
+
+
+                                                      11
+
+========== PDF PAGE 12 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+
+
+Sam Devlin, Daniel Kudenko, and Marek Grze´s.  An empirical study of potential-based reward
+  shaping and advice in complex, multi-agent systems.  Advances in Complex Systems, 14(02):
+  251–278, 2011.
+
+HanxingDing,LiangPang,ZihaoWei,HuaweiShen,andXueqiCheng. Retrieveonlywhenitneeds:
+  Adaptive retrieval augmentation for hallucination mitigation in large language models.  arXiv
+  preprint arXiv:2402.10612, 2024.
+
+Lasse Espeholt, Hubert Soyer, Remi Munos, Karen Simonyan, Vlad Mnih, Tom Ward, Yotam Doron,
+  Vlad Firoiu, Tim Harley, Iain Dunning, et al. Impala: Scalabledistributed deep-rl withimportance
+  weighted actor-learner architectures. InInt. Conf. Mach. Learn., pp. 1407–1416, 2018.
+
+YuchengFang, RuochenWang, Kun Qian,YansongFeng,Diyi Yang, andHe He. Enhancing noise
+  robustnessofretrieval-augmentedlanguagemodelsviaRAAT. InProc.Annu.Meet.Assoc.Comput
+  Linguist., 2024.
+
+Mojtaba Farahani, Orion Weller, Dawn Lawrie, Benjamin Van Durme, and Benjamin Van Durme.
+  Decipheringtheinterplaybetweenparametricandcontextualknowledgeinlanguagemodels. In
+  Conf. Empir. Methods Nat. Lang. Process., 2024.
+
+Yunfan Gao, Yun Xiong,Xinyu Gao,Kangxiang Jia, JinliuPan, Yuxi Bi, YiDai, Jiawei Sun,Qianyu
+  Guo, Meng Wang, et al. Retrieval-augmented generation for large language models: A survey.
+  CoRR, 2023.
+
+DayaGuo, DejianYang,HaoweiZhang, JunxiaoSong,Peiyi Wang, QihaoZhu, RunxinXu,Ruoyu
+  Zhang,ShirongMa,XiaoBi,etal. Deepseek-r1incentivizesreasoninginLLMsthroughreinforce-
+  ment learning. Nature, 645(8081):633–638, sep 2025a.
+
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu,
+  Shirong Ma, PeiyiWang, XiaoBi, et al. Deepseek-r1: Incentivizing reasoning capability in llms
+  via reinforcement learning. arXiv preprint arXiv:2501.12948, 2025b.
+
+Bolei He, Nuo Chen, Xinran He, Lingyong Yan, Zhenkai Wei, Jinchang Luo, and Zhen-Hua Ling.
+  Retrieving, rethinking and revising: The chain-of-verification can improve retrieval augmented
+  generation. InConf. Empir. Methods Nat. Lang. Process., pp. 10371–10393, 2024.
+
+XanhHo, Anh-KhoaDuong Nguyen,Saku Sugawara, andAkiko Aizawa. Constructing amulti-hop
+  qa dataset for comprehensive evaluation of reasoning steps. In Int. Conf. Learn. Represent., pp.
+  6609–6625, 2020.
+
+Yuanzhe Hu, Yu Wang, and Julian McAuley.  Evaluating memory in llm agents via incremental
+  multi-turn interactions. arXiv preprint arXiv:2507.05257, 2025.
+
+Aaron Jaech, Adam Kalai, Adam Lerer, Adam Richardson, Ahmed El-Kishky, Aiden Low, Alec
+  Helyar,AleksanderMadry,AlexBeutel,AlexCarney,etal. Openaio1systemcard. arXivpreprint
+  arXiv:2412.16720, 2024.
+
+BowenJin,Hansi Zeng,ZhenruiYue, JinsungYoon, SercanArik,DongWang,HamedZamani, and
+  Jiawei Han. Search-r1: Trainingllms toreason and leverage search engineswith reinforcement
+  learning. arXiv preprint arXiv:2503.09516, 2025.
+
+Xiaoxi Li, Guanting Dong, Jiajie Jin, Yuyao Zhang, Yujia Zhou, Yutao Zhu, Peitian Zhang, and
+  ZhichengDou. Search-o1: Agenticsearch-enhancedlargereasoningmodels. Conf.Empir.Methods
+  Nat. Lang. Process., 2025a.
+
+Zhong-ZhiLi,DuzhenZhang,Ming-LiangZhang,JiaxinZhang,ZengyanLiu,YuxuanYao,Haotian
+  Xu, Junhao Zheng, Pei-Jie Wang, Xiuyi Chen, et al.  From system 1 to system 2: A survey of
+  reasoning large language models. arXiv preprint arXiv:2502.17419, 2025b.
+NelsonF Liu,KevinLin, JohnHewitt,Ashwin Paranjape,Michele Bevilacqua,FabioPetroni, and
+  Percy Liang. Lost in the middle: How language models use long contexts. Transactions of the
+  Association for Computational Linguistics, 11:157–173, 2024.
+
+
+                                                      12
+
+========== PDF PAGE 13 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+
+
+ReiichiroNakano,JacobHilton,SuchirBalaji,JeffWu,LongOuyang,ChristinaKim,Christopher
+  Hesse, Shantanu Jain, Vineet Kosaraju, William Saunders, et al.   Webgpt:  Browser-assisted
+  question-answering with human feedback. arXiv preprint arXiv:2112.09332, 2021.
+
+AndrewYNg,DaishiHarada,andStuartRussell. Policyinvarianceunderrewardtransformations:
+  Theory and application to reward shaping. In Int. Conf. Mach. Learn., volume 99, pp. 278–287,
+  1999.
+
+OfirPress, MuruZhang, SewonMin, LudwigSchmidt, NoahA Smith,and MikeLewis. Measuring
+  and narrowing the compositionality gap in language models. In Findings of the Association for
+  Computational Linguistics: EMNLP 2023, pp. 5687–5711, 2023.
+
+Rajkumar Ramamurthy, Prithviraj Ammanabrolu, Kianté Brantley, Jack Hessel, Rafet Sifa, Christian
+  Bauckhage, Hannaneh Hajishirzi, and Yejin Choi.  Is reinforcement learning (not) for natural
+  language processing: Benchmarks, baselines, and building blocks for natural language policy
+  optimization. InInt. Conf. Learn. Represent., 2023.
+
+John Schulman, Sergey Levine, Pieter Abbeel, Michael Jordan, and Philipp Moritz. Trust region
+  policy optimization. InInt. Conf. Mach. Learn., pp. 1889–1897, 2015.
+
+JohnSchulman,FilipWolski,PrafullaDhariwal,AlecRadford,andOlegKlimov. Proximalpolicy
+  optimization algorithms. arXiv preprint arXiv:1707.06347, 2017.
+
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang,
+  Mingchuan Zhang, YK Li, et al.  Deepseekmath: Pushing the limits of mathematical reason-
+  ing in open language models. arXiv preprint arXiv:2402.03300, 2024.
+
+GuangmingSheng,ChiZhang,ZilingfengYe,XibinWu,WangZhang,RuZhang,YanghuaPeng,
+  Haibin Lin, and Chuan Wu. Hybridflow: A flexible and efficient rlhf framework. InEuroSys -
+  Proc. European Conf. Comput. Syst., pp. 1279–1297, 2025.
+
+FredaShi,XinyunChen,KanishkaMisra,NathanScales,DavidDohan,EdH.Chi,NathanaelSchärli,
+  and Denny Zhou. Large language models can be easily distracted by irrelevant context. In Int.
+  Conf. Mach. Learn., volume 202, pp. 31210–31227, 23–29 Jul 2023.
+
+Yunxiao Shi, Xing Zi, Zijing Shi, HaiminZhang, Qiang Wu, and Min Xu. Enhancing retrieval and
+  managingretrieval: A four-modulesynergyfor improvedquality andefficiencyin ragsystems. In
+  Front. Artif. Intell. Appl., pp. 2258–2265. IOS Press, 2024.
+Huatong Song, Jinhao Jiang, Wenqing Tian, Zhipeng Chen, Yuhuan Wu, Jiahao Zhao, Yingqian
+  Min, Wayne Xin Zhao, Lei Fang, and Ji-Rong Wen. R1-searcher++: Incentivizing the dynamic
+  knowledgeacquisitionofllms viareinforcementlearning. arXivpreprintarXiv:2505.17005,2025.
+
+NisanStiennon, LongOuyang,JeffreyWu, DanielZiegler, RyanLowe, ChelseaVoss, AlecRadford,
+  DarioAmodei, andPaulF Christiano. Learningtosummarize withhumanfeedback. Adv. Neural
+  Inform. Process. Syst., 33:3008–3021, 2020.
+
+Zhaochen Su, Jun Zhang, Xiaoye Qu, Tong Zhu, Yanshu Li, Jiashuo Sun, Juntao Li, Min Zhang, and
+  Yu Cheng. Conflictbank: A benchmark for evaluating the influence of knowledge conflicts in llm.
+  InAdv. Neural Inform. Process. Syst., volume 37, pp. 103242–103268, 2024.
+
+HexiangTan,FeiSun,WanliYang,YuanzhuoWang,QiCao,andXueqiCheng. Blindedbygenerated
+  contexts: Howlanguagemodelsmergegeneratedandretrievedcontextswhenknowledgeconflicts?
+  InProc. Annu. Meet. Assoc. Comput Linguist., pp. 6207–6227, 2024.
+
+Harsh Trivedi, Niranjan Balasubramanian, Tushar Khot, and Ashish Sabharwal. Musique: Multihop
+  questions via single-hop question composition.  Trans. Assoc. Comput. Linguist., 10:539–554,
+  2022.
+FeiWang,Xingchen Wan,Ruoxi Sun,Jiefeng Chen,andSercan ÖArık. Astuterag: Overcoming
+  imperfect retrieval augmentation and knowledge conflicts for large language models. Proc. Annu.
+  Meet. Assoc. Comput Linguist., 2025a.
+
+
+                                                       13
+
+========== PDF PAGE 14 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+
+
+HanWang,Archiki Prasad,Elias Stengel-Eskin, andMohit Bansal. Retrieval-augmented generation
+  with conflicting evidence. InConference on Language Modeling, 2025b.
+
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V Le, Ed H Chi, Sharan Narang, Aakanksha
+  Chowdhery,andDennyZhou. Self-consistencyimproveschainofthought reasoninginlanguage
+  models. InInt. Conf. Learn. Represent., 2023.
+
+Yilin Wen, Zifeng Wang, and Jimeng Sun. Mindmap: Knowledge graph prompting sparks graph
+  ofthoughts inlarge languagemodels. InProc. Annu.Meet.Assoc. ComputLinguist.,pp. 10370–
+  10388, 2024.
+
+Jian Xie, Kai Zhang, Jiangjie Chen, Renze Lou, and Yu Su. Adaptive chameleon or stubborn sloth:
+  Revealing the behavior of large language models in knowledge conflicts.  In Int. Conf. Learn.
+  Represent., 2024a.
+
+Jian Xie, Kai Zhang, Jiangjie Chen, Renze Lou, and Yu Su. Adaptive chameleon or stubborn sloth:
+  Revealing the behavior of large language models in knowledge conflicts, 2024b.
+
+Shicheng Xu, Liang Pang, Mo Yu, Fandong Meng, Huawei Shen, Xueqi Cheng, and Jie Zhou.
+  Unsupervised information refinement training of large language models for retrieval-augmented
+  generation. InProc. Annu. Meet. Assoc. Comput Linguist., pp. 133–145, 2024.
+
+Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Bengio, William Cohen, Ruslan Salakhutdinov,
+  and Christopher D Manning.  Hotpotqa: A dataset for diverse, explainable multi-hop question
+  answering. InConf. Empir. Methods Nat. Lang. Process., pp. 2369–2380, 2018.
+
+OriYoran,TomerWolfson,OriRam,andJonathanBerant. Makingretrieval-augmentedlanguage
+  models robust to irrelevant context. Int. Conf. Learn. Represent., 2024.
+
+QiyingYu, ZhengZhang,RuofeiZhu, YufengYuan,Xiaochen Zuo,YuYue,TiantianFan, Gaohong
+  Liu,LingjunLiu,XinLiu,etal. Dapo: Anopen-sourcellmreinforcementlearningsystematscale.
+  arXiv preprint arXiv:2503.14476, 2025.
+
+Eric Zelikman, Georges Harik, Yijia Shao, Varuna Jayasiri, Nick Haber, and Noah D. Goodman.
+  Quiet-STaR:Languagemodelscanteachthemselvestothink beforespeaking. In Int.Conf.Learn.
+  Represent., 2024.
+
+A T   RAINING DYNAMICS OFβ
+
+Inouradaptivescheme,β  actsasadynamicgatethatmodulatestheinfluenceoftherelativeparametric
+reward. As shown in Table6, on the ConFiQA-MC dataset,        β  undergoes a rapid descent during the
+initial stages of training, dropping from0.23  and stabilizing at a very low value (0.01 ). This rapid
+convergence is significant: it indicates that the reinforcement learning process quickly identifies
+theinherentunreliabilityoftheexternalcontextinadversarialscenarios. Byloweringβ ,themodel
+effectivelyincreasesthepenaltyfordeviatingfromitscorrectinternalparametricknowledgewhen
+pressured by misleading context. This "calibration" process happens surprisingly fast, suggesting
+that the model’s internal representations already contain the necessary cues to distinguish between
+high-confidence parametric facts and low-quality external interference.
+
+Table 6: β  value over training steps (ConFiQA-MC). Rapid convergence to a near-optimal regime
+that protects PK as fallback.
+
+                                                   Step      β
+                                                     1       0.23
+                                                     2       0.15
+                                                     4       0.07
+                                                     6       0.10
+                                                     8       0.01
+
+
+
+                                                        14
+
+========== PDF PAGE 15 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+
+B L   OCAL VS. GLOBAL ADVANTAGE WEIGHT ABLATION
+
+Weablatethelocal:globaladvantagecombinationratiotoconfirmrobustnesstothishyperparameter.
+The "local" advantage (A ck − local  ) focuses on optimizing the policy relative tothe average of its own
+rolloutsforaspecificquery-contextpair,encouragingthemodeltofindthebestreasoningpathwithin
+that specific evidence. In contrast, the "global" advantage (A ck − global  ) penalizes the model based
+onitsperformanceacrossthebroaderdistributionofsamples. ResultsonConFiQA(Qwen2.5-7B)
+showthatthe1:1combinationisnear-optimal. Thissuggeststhatthemodelbenefitsequallyfrom
+source-specificoptimizationandoveralldistributionalstability. Thefactthatperformanceremains
+stable across the 1:1 and 1:2 ratios indicates that Knowledgeable-R1 is not overly sensitive to the
+exact weightingof these two signals, provided both are present to balancespecialized reasoning with
+general robustness.
+
+Table7: Local:globaladvantageratioablation. Combiningbothisbetterthaneitheralone;theexact
+ratio matters little.
+
+                                     Local:Global     Setting              Avg. score
+                                     1:0                     local-only             60.95
+                                     0:1                     global-only          64.69
+                                     1:1                     local+global         65.40
+                                     1:2                     local+global         65.20
+
+
+
+C S1 P   ERFORMANCE GAP AND COMPONENT WEIGHTING
+
+A key discussion arises regarding the performance gap on S1 (correct context) compared to the
+standard GRPOw/ RAG baseline. To investigate this,we performed asweep overthe weights ofour
+three objectives (J PK  ,J CK  ,J RPK    ). As shown in Table8, the S1 performance is extremely sensitive
+totheweightofthecontextualobjectiveJ CK   . Byincreasingitsrelativeweighttoa1:2:1ratio,we
+can almost entirely close the gap with the baseline (78.04% vs. 77.36%) while still maintaining a
+massiveleadintheadversarialS2scenario(32.73%vs.19.74%). Thisconfirmsthatthereisatunable
+"Pareto front" between absolute mastery of reliable context and robustness to unreliable context.
+We chose the 1:1:1 ratio as our default because it offers a more conservative "safety first" profile,
+prioritizing the prevention of catastrophic failures in adversarial settings.
+
+Table 8: Ablation ofJ PK   :J CK   :J RPK     weights on ConFiQA-MC(Qwen2.5-7B). HigherJ CK    weight
+closes the S1 gap.
+
+                            J PK   :J CK   :J RPK                  S1 (correct ctx)   S2 (adversarial)
+                            1:2:1                                      78.04%                32.73%
+                            1:1:1 (ours)                           75.51%                37.34%
+                            0:1:1                                      75.68%                35.53%
+                            0:1:0 (GRPO w/ RAG)         77.36%                19.74%
+
+
+
+D Q   UERY-ONLY VS. QUERY+CONTEXT BEHAVIOR
+
+We   compare   query-only   and   query+context   inference   for   both   GRPO   w/   RAG   and
+Knowledgeable-R1 on ConFiQA-MC (Qwen2.5-7B) under S1 (correct context) and S2 (wrong con-
+text). AsshowninTable9,         Knowledgeable-R1exploitshigh-qualitycontext(S1: 35.64%→  75.08%)
+andalsosubstantiallyoutperformsGRPOw/RAGwhencontextiswrong(S2: 43.94%vs.26.94%),
+demonstratingthatthelearnedpolicyactivelyattenuatesmisleadingcontextratherthanignoringit
+blindly.
+
+
+                                                           15
+
+========== PDF PAGE 16 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+
+
+Table9: Accuracyunderquery-onlyvs.query+contextinference(ConFiQA-MC,Qwen2.5-7B).Our
+method benefits from context when it is correct and resists it when wrong.
+
+                       Method                                S1 (correct ctx)   S2 (wrong ctx)     Avg.
+                       Query-only (base)                      27.72%               25.92%         26.82%
+                       RAG prompting                         65.68%               13.47%         39.58%
+                       GRPO-RAG (query-only)         32.48%               31.48%         31.98%
+                       GRPO-RAG (context)               77.56%               26.94%         52.25%
+                       Ours (query-only)                      35.64%               36.70%         36.17%
+                       Ours (context)                            75.08%               43.94%         59.51%
+
+E S   ENSITIVITY TO GOOD/BAD CONTEXT RATIO
+
+A common concern in RL for RAG is whether the model just learns the "noise ratio" of the training
+data. To test this, we trained Knowledgeable-R1 on data where bad contexts were extremely rare
+(only1%). AsTable10shows,           Knowledgeable-R1stillmanagestoimproveS2performancesignifi-
+cantly compared to GRPO w/ RAG. This is a crucial finding: it suggests thatKnowledgeable-R1
+is not just learning a naive prior that says "the context is often wrong," but is instead learning a
+genuine decision boundary that triggers parametric knowledge whenever the context is perceived as
+unreliable. Even a small number of adversarial signals during training are sufficient to ground the
+model’s reasoning process in its own parametric knowledge.
+
+Table10: Sensitivitytogood:badcontext ratiointraining (ConFiQA-MR,Qwen2.5-7B).Evenwith
+99% good context, Knowledgeable-R1 improves S2 resistance.
+
+                  Good:Bad Ratio        Method                       S1 (correct ctx)    S2 (wrong ctx)
+                                            RAG                                  65.68%                13.47%
+                  99%:1%                    GRPO w/ RAG                 73.60%                14.31%
+                                            Knowledgeable-R1          72.11%                17.34%
+                                            RAG                                  65.68%                13.47%
+                  75%:25%                   GRPO w/ RAG                 74.92%                20.03%
+                                            Knowledgeable-R1          73.76%                29.29%
+                                            RAG                                  65.68%                13.47%
+                  50%:50% (default)         GRPO w/ RAG                 77.56%                26.94%
+                                            Knowledgeable-R1          75.08%                43.94%
+
+
+F P  ARTIAL-CONFLICT SENSITIVITY
+
+We construct test sets varying the number of misleading passages (1, 2, 4, 8) while keeping the query
+andgoldanswerfixed.Knowledgeable-R1consistentlyoutperformsGRPOw/RAGacrossalllevels
+of context adversariality.
+
+Table11: Accuracyvs.numberofmisleadingpassages. Knowledgeable-R1maintainsasubstantial
+lead across all levels. (ConFiQA-MC, Qwen2.5-7B)
+
+                      # misleading passages                 1                2                4                8
+                      GRPO w/ RAG                       26.94%     26.60%     25.76%      25.42%
+                      Knowledgeable-R1 (ours)     43.94%     43.10%     42.26%     40.07%
+
+
+G C   ONTEXT-DEPENDENCE DIAGNOSTICS
+
+To verify that robustness arises from the learned PK/CK arbitration rather than coincidence, we
+evaluate on subsets stratified by knowledge correctness and report two explicit diagnostic metrics on
+a test set where the context is designed to be wrong:
+
+
+                                                              16
+
+========== PDF PAGE 17 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+
+
+•  Factuality-score (w.r.t. context): This metric measures the linguistic and semantic alignment
+   between the model’s answer and the provided context.  A high score when context is wrong
+   indicates that the model has been "led astray" by the evidence. Lower is better in this scenario.
+
+
+•  KL-score: ThismeasurestheKLdivergencebetweentheoutputprobabilitydistributionsgenerated
+   with vs. without context. It acts as astructural measure of "contextual reliance." If the KL-score
+   is low, the model is essentially ignoring the context andrelying on its parametricprior. Lower is
+   better when context is known to be misleading.
+
+AsseeninTable12,           Knowledgeable-R1achievessignificantlylowerscoresonbothmetrics,proving
+it has learned to actively decouple its reasoning from unreliable external inputs.
+
+
+Table 12:  Context-dependence diagnostics on wrong-context test set (ConFiQA-MC). Lower
+factuality-score and KL-score confirmKnowledgeable-R1 relies less on misleading context.
+
+                          Method                                   Factuality-score↓     KL-score↓
+                          GRPO w/ RAG                                 0.40                   213.73
+                          Knowledgeable-R1(ours)                0.16                   168.83
+
+
+
+To further rule out that robustness is purely inherited from the base model, we stratify by whether
+RAGpromptinggivesthecorrectanswer(Table13). OnthesubsetwhereRAGprompting           always
+fails, ourmethod achieves32.72%, farahead ofSFT (18.73%)and GRPO(19.92%), indicatingthe
+improvement stems from the learned PK/CK arbitration mechanism.
+
+
+Table 13: Accuracy stratified by RAG-prompting outcome (ConFiQA-MC, wrong-context test set).
+Our method gains the most on the hardest subset where RAG prompting always fails.
+
+                  Method                                   RAG-answer correct↑     RAG-answer wrong↑
+                  RAG prompting                                   100%                                 0%
+                  SFT                                                    90.27%                            18.73%
+                  GRPO w/ RAG                                  96.61%                            19.92%
+                  Knowledgeable-R1(ours)                95.25%                           32.72%
+
+
+
+
+H P   ROMPT DESIGNED IN Knowledgeable-R1 AND BASELINES
+
+
+ToassesstheperformanceofKnowledgeable-R1,wecompareditagainstarangeofdifferentbaseline
+methodologies:
+Prompt-basedMethods: Theseapproachesincludequery-onlyprompting,Retrieval-Augmented
+Generation (RAG prompting), and Astute RAG (Wang et al.,2025a).
+Decoding-based Methods: We experiment with CK-PLUG (Bi et al.,2025c).
+Fine-tuning-basedMethods: WeevaluateKnowledgeable-R1againstGRPO(Guoetal.,2025b)
+with RAG prompting (GRPOw/   RAG).
+These baselines encompass a broad spectrum of retrieval-enhanced and fine-tuning methods. To
+ensure a fair comparison, we standardized the contextual knowledge sources, training datasets, and
+Large Language Models (LLMs) used across all methods.
+
+
+                                                           17
+
+========== PDF PAGE 18 / 22 ==========
+                                Published as a conference paper at ICLR 2026
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Astute RAG prompt
+
+  Generate a document that provides accurate and relevant information to answer the given question. If
+  the information is unclear or uncertain, explicitly state ’I don’t know’ to avoid any hallucinations.
+  Question: {question}
+  Document:
+ Task: Consolidate information from both memorized documents and externally retrieved documents in
+  response to the given question.
+  For documents that provide consistent information, cluster them together.
+  For documents with conflicting information, separate them into distinct documents.  Exclude any
+  irrelevant information.
+  Question: {question}
+  Context: {context}
+  Provide consolidated documents in JSON format:
+  [”content    ”: ” consolidatedcontent           ”,”source    ” :[” docids   ”],”consistency        group   ”: ” groupid    ”]
+ Task: Answer the question using consolidated information from both internal and external documents.
+  Initial Context: {initial context}
+  Consolidated Context: {consolidated context}
+ After the user asks a question, you first think carefully and then give the answer. When responding,
+RAG promptingplease keep the following points in mind:
+ - Answer the question using consolidated information from both internal and external documents.
+ {search_results}-Thereasoningprocessandanswerareenclosedwithin<think></think>and<answer></answer>tags,
+ You are a helpful assistant. After the user asks a question, you first think carefully and then give therespectively.
+ -Outputyour finalanswerdirectlybetweenthe tag<answer></answer>withoutanyintermediatesteps.answer.
+ -If theusergivesamultiplechoice question,youranswer mustbea single optionAor BorC orDor EWhen responding, please keep the following points in mind:
+ -Thereasoningprocessandanswerareenclosedwithin<think></think>and<answer></answer>tags,Here is an example:
+  respectively.Question:
+ -Outputyour finalanswerdirectlybetweenthe tag<answer></answer>withoutanyintermediatesteps.what is the capital of China?
+ <think> reasoning process here </think>Here is an example:
+ <answer> BeiJing </answer>user’s question: what is the capital of China?
+ <think> reasoning process here </think>Now,youshouldansweruser’squestion. Afteransweruser’squestion,youshouldstopgenerate. Here
+ <answer> BeiJing </answer>is user’s question:                                                  18
+  Question:Question:
+ {question}{question}
+
+========== PDF PAGE 19 / 22 ==========
+                                Published as a conference paper at ICLR 2026
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+GRPOw/   RAG & Knowledgeable-R1-p′(CK)
+CK-PLUG promptKnowledgeable-R1-p (PK)You are a helpful assistant. After the user asks a question, you first think carefully and then give the
+SFT baseline promptanswer.
+ You are a helpful assistant. After the user asks a question, you first think carefully and then give theYou are a helpful assistant. After the user asks a question, you MUST direct give the final answer.When responding, please keep the following points in mind:
+ -Thereasoningprocessandanswerareenclosedwithin<think></think>and<answer></answer>tags,You are a helpful assistant. After the user asks a question, you MUST directly give the answer.When responding, please keep the following points in mind:answer.
+ -Outputyour finalanswerdirectlybetweenthe tag<answer></answer>withoutanyintermediatesteps.When responding, please keep the following points in mind:When responding, please keep the following points in mind:respectively.
+ -Thereasoningprocessandanswerareenclosedwithin<think></think>and<answer></answer>tags,-Pleaseanswerwithreferencetothecontext,butifthecontextconflictswithyourinternalknowledge,-Outputyour finalanswerdirectlybetweenthe tag<answer></answer>withoutanyintermediatesteps.- You must directly output your final answer and don’t output another things.
+ - Stop your output after final answerHere is an example:respectively.prioritize your internal knowledge.
+ -Outputyour finalanswerdirectlybetweenthe tag<answer></answer>withoutanyintermediatesteps.-Outputyour finalanswerdirectlybetweenthe tag<answer></answer>withoutanyintermediatesteps.user’s question: what is the capital of China?Here is an example:
+ <think> reasoning process here </think>Here is an example:Here is an example:user’s question: what is the capital of China?
+ <answer> BeiJing </answer><answer> BeiJing </answer>Question:user’s question: what is the capital of China?
+ <think> reasoning process here </think>what is the capital of China?Retrieved information:Retrieved information:
+ {retrieved information}{retrieved information}<answer> BeiJing </answer><answer> BeiJing </answer>19
+ Question:Question:Question:Question:
+ {question}{question}{question}{question}
+
+========== PDF PAGE 20 / 22 ==========
+                             Published as a conference paper at ICLR 2026
+
+
+
+                             I  I NFERENCE INPUT IN EXPERIMENTS
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                             J  E  XPERIMENTAL SETUP
+
+                             Datasets. In our comprehensive evaluation of Knowledgeable-R1, we have considered a diverse
+                             range of benchmark datasets that represent various challenges of reasoning and knowledge, cat-
+                             egorized into five scenarios in4.1.2.  The specific datasets are: Multi-hop Question Answering
+                            with HotpotQA, 2WikiMultiHopQA, and Musique; Knowledge Conflict Question Answering with
+                             ConFiQA, where external knowledge retrieval contradictions necessitate internalized knowledge for
+                             judgement, and ExplainPE, a medical knowledge multiple-choice dataset that tests noise robustness
+                             byintroducingthreetiersofnoiselevelsbasedonthenumberofnon-matchingexternaldocuments
+                             retrieved. ForConFiQA,werandomlyadd correctandincorrectcontextstothedatafortrainingin
+                             the sameproportion. Ouraim isto test Knowledgeable-R1’s capabilityto handle complex scenarios
+                             like single-hop answer, multi-hop reasoning and answer choice selection under different levels of
+                             external error or noisy context.
+                            Training.      We  conduct  experiments  with  Qwen2.5-3B-Instruct,   Qwen2.5-7B-Instruct,
+                             Qwen2.5-14B-Instruct, and Llama3.1-8B-Instruct.  All datasets, except HotpotQA, 2Wiki-
+                             MultiHopQA, andMusique, are trained andevaluated on theirrespective training and testsets. The
+                             ConfiQA dataset includes threesubsets: MR, MC, and QA, which are similarly trained and evaluated
+                             ontheirrespectivesets. ForHotpotQA,2WikiMultiHopQA,andMusique,welimitthenumberof
+                             retrieveddocumentsto5(theofficialsettinguses20)toensureincompletedocumentevidenceduring
+                             training. At test time, we evaluate on the validation sets of these datasets.
+                            Trainingstability. Knowledgeable-R1remainsstableacrossallourexperiments: losses,rewards,
+                             and value estimates evolve smoothly across 200+ training runs covering both GRPO w/ RAG and
+                             Knowledgeable-R1 configurations.  No collapse or divergence was observed, indicating that the
+                             additionalPK/RPK objectivesintroduce noextra instabilityon topof thestandard GRPOtraining
+                             loop.
+                             Retrieval setup. We use dataset-provided contexts without any additional retriever. The contexts
+                            (includingbothcorrect andincorrectpassages)aredirectlytaken fromthebenchmarkconstruction,
+Inference Input in Experimentswithout re-indexing or re-retrieval from a larger corpus. We adopt the top-5 paragraphs provided
+ You are a helpful assistant. After the user asks a question, you first think carefully and then give theby these benchmarks, preserve their original order, and only truncate when the backbone model’s
+ answer.                     maximum length is exceeded.
+ When responding, please keep the following points in mind:Computational Efficiency. Knowledgeable-R1 uses 16 CK + 16 RPK trajectories (vs. GRPO’s
+ -Thereasoningprocessandanswerareenclosedwithin<think></think>and<answer></answer>tags,32). Withsharedforwardpasses,per-epochtimeis1h38mvs.1h19mforGRPO—amodest  ∼ 24%
+ respectively.               overhead for significantly larger robustness gains.
+ -Outputyour finalanswerdirectlybetweenthe tag<answer></answer>withoutanyintermediatesteps.
+ Here is an example:         For both GRPO-based baselines and our Knowledgeable-R1, we use a global batch size of 128, a
+ user’s question: what is the capital of China?rolloutbatch sizeof32,a rollouttemperatureof 1,anda learning rateof1 ×  10 − 6. Allexperiments
+ <think> reasoning process here </think>are conducted on 8 H100 GPUs, with a consistent system prompt for both training and inference.
+ <answer> BeiJing </answer>
+ Retrieved information:
+ {retrieved information}                                                             20
+ Question:
+ {question}
+
+========== PDF PAGE 21 / 22 ==========
+Published as a conference paper at ICLR 2026
+
+
+
+K E   VALUATION
+
+ForRAGgenerationcapability. WeuseExactMatch(EM)astheevaluationmetricfollowing(Jin
+et al.,2025).  Evaluation is conducted on the test or validation sets of all datasets to assess both
+in-domainandout-of-domainperformance. Forintegratingparametric/contextualknowledgetask,
+we adopted EM and self-defined metrics to evaluate the model’s ability to utilize parametric and
+contextual knowledge.
+
+L M   ETHOD TRAINING PROCEDURE
+
+
+Algorithm 1Knowledgeable-R1: Policy Optimization for Knowledge Exploration
+     Input: Current policyπ θ, old policyπ θ old, datasetD , training stepsStep    max, parametric knowledge prompt-
+     ing rollout numbern pk , contextual knowledge prompt rollout numbern ck , clip parametricϵ, advantage
+     transformation functionT (·), parametric knowledge promptp, contextual knowledge promptp′ .
+     Output: Updated policyπ θ
+ 1: fors =1   toStep    max do
+ 2:    Sample batch   (p) ∼D
+ 3:    Sample batch   (p′) ∼D
+ 4:    Sample  {oi}n pki=1   fromπ θ old(o |p)                                                ▷ Parametric knowledge rollouts
+ 5:    Sample  {o′j}n ckj=1   fromπ θ old(o′|p′)                                              ▷ Contextual knowledge rollouts
+ 6:    Compute advantages   A i ,A ′j and ˆA i for all rollouts
+ 7:    Define   J PK    as the parametric knowledge based-policy objective:n pkX   π θ (oi,t |p,o i,<t  )   π θ (oi,t |p,o i,<t  )
+                             |oi|X
+         J PK   =     1n pk       min     π θ old(oi,t |p,o i,<t  )A i,clip   π θ old(oi,t |p,o i,<t  );1 −  ϵ,1+   ϵ    A i
+                        i=1  t=1
+ 8:    Define   J CK    as the contextual knowledge based-policy objective:"  π θ  o′j,t |p′,o′j,<t     π θ  o′j,t |p′,o′j,<t !#
+                      n ckX|o′j|X
+       J CK   =    1n ck        min     π θ old o′j,t |p′,o′j,<tA ′j,clip    π θ old o′j,t |p′,o′j,<t;1 −  ϵ,1+   ϵ      A ′j
+                      j=1  t=1
+ 9:       DefineJ RPK     astheparametricknowledgereasoningpolicyobjectivewithcontextualknowledgeinput:n pkX   π θ (oi,t |p′,oi,<t  )   π θ (oi,t |p′,oi,<t  )
+                           |oi|X
+     J RPK    =     1n pk      min     π θ old(oi,t |p′,oi,<t  )T ( ˆA i),clip   π θ old(oi,t |p′,oi,<t  );1 −  ϵ,1+   ϵ     T ( ˆA i)
+                      i=1  t=1
+10:  Combine     J PK  ,J CK  ,J RPK     to form the updated objective functionJ (θ):
+                                           J (θ)=   λ pk J PK   +  λ ck J CK   +  λ rpk J RPK
+11:      θ ←   θ +  ∇  θJ (θ)                                                                 ▷ Update current policy parametric
+12:      θ old←   θ                                                                                   ▷  Update old policy parametric
+13: end for
+
+MA    DDITIONAL EXPERIMENT RESULTS
+
+We validated the performance improvement of our method across models of varying sizes with 3B,
+7B, 14B. As shown in the Table14, our approach achieved significant enhancements compared to
+RAG prompt in all five scenarios. It also showed considerable improvement over GRPO w/RAG
+whenexternalknowledgecontainederrorsorincompleteinformation,andaslightimprovementwhen
+externalknowledgeservedasinterference. Thisdemonstratestheeffectivenessandversatilityofour
+method.
+
+N U   SE OF LLMS
+
+Largelanguagemodels(LLMs),specificallyGPT-5andDeepSeek-R1,wereusedsolelyasasupple-
+mentarytoolduringthepreparationofthisworkfortaskssuchaspolishingthewriting. Theauthors
+aresolelyresponsiblefortheentireresearchconception,technicaldirection,scientificcontent,and
+interpretationofresults. TheLLMswereemployedonlytoassistinthepresentationandclarityof
+the manuscript.
+
+
+                                                               21
+
+========== PDF PAGE 22 / 22 ==========
+                                                 Published as a conference paper at ICLR 2026
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                 Table 14: Overallaccuracy across five contextualscenarios: correct(S1), wrong (S2),conflict (S3),
+                                                 irrelevant (S4), and partly-irrelevant (S5). Best results are in bold, second best are underlined. The
+                                                 "improve" row shows gains over RAG prompting.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                          Correct(S1)                            Wrong(S2)                Conflict(S3)   Irrelevant(S4)             PartlyIrrelevant(S5)
+
+Method                            PC-MR     PC-MC     PC-QA    NC-MR    NC-MC    NC-QA          SC             ExplainPE      HotPotQA        2WikiMultiHopQA   Musique
+
+Qwen2.5-14B-Instruct
+Query-onlyprompting          30.03%     26.52%     35.80%     30.64%     28.95%     39.42%       30.92%            70.80%          25.35%        26.69%        5.67%
+RAGprompting                  63.20%     63.85%     73.32%     22.22%     12.99%     28.11%       61.85%            70.51%          22.90%        22.49%        6.91%
+GRPOw/RAG                   73.60%    74.66%              78.86%    38.89%         31.74%       36.51%         74.00%                -              34.71%        39.03%         14.73%
+Knowledgeable-R1             70.63%          75.17%    78.83%         47.81%    33.06%    38.13%       72.50%                        -              36.98%        42.33%       14.60%22
+improve                          +7.43%      +11.32%      +5.51%      +24.99%      +20.07%     +10.02%        +10.65%                -            +14.08%         +19.84%        +7.69%
+
+Qwen2.5-7B-Instruct
+Query-onlyprompting          27.72%     24.66%     31.67%     25.93%     25.82%     32.31%       29.67%            64.45%          20.90%        25.54%        4.36%
+RAGprompting                  65.68%     66.39%     74.35%     13.47%     8.06%     11.31%       59.50%            62.21%          20.36%        22.53%        6.41%
+Astute(Wangetal.,2025a)    65.51%     66.05%     77.62%     12.79%     7.07%     10.34%       54.20%            56.74%          17.87%        20.35%        6.29%
+GRPOw/RAG                   77.56%    77.36%    80.03%                 26.94%      19.74%       26.01%         75.33%            66.50%           27.93%          33.95%         11.79%
+Knowledgeable-R1             75.08%     75.51%            80.90%    43.94%    37.34%    29.40%       76.33%           67.57%         31.45%        37.52%       12.04%
+improve                          +9.41%      +9.12%       +6.54%      +30.47%      +29.28%     +18.09%        +15.92%            +5.36%           +11.09%         +14.99%        +5.63%
+
+Qwen2.5-3B-Instruct
+Query-onlyprompting          16.83%     18.41%     23.92%     15.99%     18.26%     22.62%       20.75%            53.32%          12.55%        11.28%        2.11%
+RAGprompting                  55.12%     52.87%     59.55%     13.47%     8.72%      6.79%        51.25%            42.19%          14.71%           13%          3.64%
+Astute(Wangetal.,2025a)    62.05%     60.47%     67.99%     9.60%      7.07%     10.66%       51.92%            41.60%            0.8%           8.72%         5.01%
+GRPOw/RAG                   70.96%    70.61%    80.03%    19.87%                   15.13%       19.39%         66.67%            53.61%           24.78%          35.57%          9.06%
+Knowledgeable-R1             66.17%          59.80%       78.66%      28.79%    28.62%    21.97%            -                54.69%              -                 -                -
+improve                         +11.05%      +6.93%      +19.11%      +15.32%      +19.9%      +15.15%             -             +1.37%               -               -              -

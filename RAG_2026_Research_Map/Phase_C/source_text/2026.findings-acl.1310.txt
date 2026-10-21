@@ -1,0 +1,2658 @@
+
+
+========== PDF PAGE 1 / 27 ==========
+Findings of the Association for Computational Linguistics: ACL 2026, pages 26282–26308
+July 2-7, 2026 ©2026 Association for Computational Linguistics
+Beyond Chunks and Graphs: Retrieval-Augmented Generation through
+Triplet-Driven Thinking
+Shengbo Gong1, Xianfeng Tang2, Qi He3, Carl Yang1 and Wei jin1
+1Emory University,2Amazon, 3Microsoft
+{shengbo.gong, j.carlyang, wei.jin}@emory.edu, 2xianft@amazon.com
+Abstract
+Retrieval-augmented generation (RAG) is criti-
+cal for reducing hallucinations and incorporat-
+ing external knowledge into Large Language
+Models (LLMs). However, advanced RAG
+systems face a trade-off between performance
+and efficiency. Multi-round RAG approaches
+achieve strong reasoning but incur excessive
+LLM calls and token costs, while Graph RAG
+methodssufferfromcomputationallyexpensive,
+error-prone graph construction and retrieval re-
+dundancy. To address these challenges, we
+propose T2RAG, a novel framework that oper-
+ates on a simple, graph-free knowledge base of
+atomic triplets. T2RAG leverages an LLM to
+decompose questions into searchable triplets
+with placeholders, which it then iteratively re-
+solves by retrieving evidence from the triplet
+database. Empirical results show that T2RAG
+significantly outperforms state-of-the-art multi-
+round and Graph RAG methods, achieving an
+average performance gain of up to 11% across
+six datasets while reducing retrieval costs by
+up to 45%. Our code is available athttps://
+anonymous.4open.science/r/T2RAG-DF75.
+1 Introduction
+Large Language Models (LLMs) have become
+central to open-domain question answering (QA)
+systems, owing to their vast stores of parametric
+knowledge and remarkable instruction-following
+capabilities (Yue, 2025; Gu et al., 2024b; Glenn
+et al., 2024). However, their effectiveness is often
+undermined by critical challenges such as catas-
+trophic forgetting and hallucination, particularly
+when addressing questions that require access to
+evolving, real-world knowledge (Gu et al., 2024a;
+Huang et al., 2025; Zhong et al., 2023; Liu et al.,
+2025c). Consequently, Retrieval-Augmented Gen-
+eration (RAG) has emerged as a robust paradigm
+to mitigate these issues (Lewis et al., 2020; Gao
+et al., 2023) by retrieving relevant documents from
+an external knowledge corpus.
+However, standard RAG systems, which rank
+document chunks by query similarity (Karpukhin
+et al., 2020; Sawarkar et al., 2024; Khattab and
+Zaharia, 2020), are effective for simple questions
+but fail on complex ones that require multi-hop
+reasoning(TangandYang,2024;Liuetal.,2025d).
+This failure occurs because queries often lack the
+necessary intermediate entities to connect informa-
+tionacrossdifferentchunks(Shenetal.,2024),and
+importantdetailscanbelostinthecompressionloss
+of long chunk embeddings (Zhang et al., 2024b).
+To address these issues, two primary research
+directions have emerged, each with its own chal-
+lenges.Multi-Round RAGleverages the LLM’s
+reasoning abilities by decomposing complex ques-
+tions into sequential sub-queries. While effective
+at traversing multi-hop knowledge paths, it is time
+andtoken-consuming, often requiring numerous
+(3-6)LLMcallsineachround(Trivedietal.,2023;
+Xuetal.,2025;Shenetal.,2024),anduptoaround
+8roundsintotal(Trivedietal.,2023). Additionally,
+it also faces the challenge ofcompression loss. On
+the other hand,Graph RAG(Edge et al., 2024;
+Han et al., 2024; Peng et al., 2024) structures the
+corpus into a knowledge graph to retrieve logically
+connected information. However, this approach is
+hindered by an expensive and error-prone graph
+construction process due toentity ambiguityis-
+sue (Hoffart et al., 2014),redundancyin retrieval
+fromhigh-degreenodes(Pengetal.,2024),andthe
+difficultyLLMsfacewhenunderstandingthegraph
+structures (Chai et al., 2023). The challenges of
+the above two lines of work lead to a question:
+Can we directly use the triplets as the fundamen-
+tal unit of RAG, thus avoid the entity’ ambiguity
+causedbyentitylevelandcompressionlosscaused
+by chunks level?
+Motivated by this question, we propose T2RAG
+(Triplet-driven Thinking forRetrieval-Augmented
+Generation),anovelframeworkthatfundamentally
+re-architects the RAG pipeline and moves beyond
+traditional chunk-based or graph-based retrieval
+by operating directly on atomic knowledge triplets.
+Unlike Graph RAG, it completely sidesteps the
+costly, time-consuming, and error-prone process
+1
+26282
+
+========== PDF PAGE 2 / 27 ==========
+(a) Multi-round RAG
+(b) Graph RAG
+(c) Triplet-driven Thinking RAG (Ours)
+Question: Which film has the director born earlier, God’s Gift To Women or Aldri Annet Enn Brak? 
+I need to find the birth years of 
+the directors of both films: 
+Michael Curtiz for "God's Gift 
+to Women" and Edith Carlmar
+for "Aldri annet enn bråk....
+LLM Reasoning LLM Evaluation
+No
+If the information is 
+enough to answer?
+Yes + 
+Answer
+Director, Birthday, Born, 
+God’s Gift To Women, 
+Aldri Annet Enn BrakQuery Entity/Relation 
+extraction
+Aldri annet enn 
+bråk\nAldri annet 
+enn bråk is a 
+1954 film...
+Corpus Entity/Relation extraction KG Construction
+God’s Gift To Women, is directed by, ?DirectorA
+Aldri Annet Enn Brak, is directed by, ?DirectorB
+?DirectorA, was born in, ?birthYearA
+?DirectorB, was born in, ?birthYearB
+LLM Reasoning
+Aldri annet enn 
+bråk\nAldri annet 
+enn bråk is a 
+1954 film...
+Corpus Entity/Relation extraction
+Chunk 
+Vector
+DB
+Triplet 
+Vector 
+DB
+PageRank/Shortest 
+path/neighbor expansion…
+Target subgraph
+Answer
+Chunk
+Vector
+DB
+Combine raw chunks
+LLM Resolving
+Michael Curtiz, was born in, ?birthYearA
+Edith Carlmar, was born in, ?birthYearB
+…
+Answer
+Stop until all 
+triplets solved
+…
+Entity
+Vector 
+DB
+Relation
+Vector 
+DB
+Retrieve from DB
+Control flow
+Entity Ambiguity
+Compression Loss
+Token Consuming
+Redundancy
+Figure1: AcomparisonofthreeRAGparadigms,withtheirprimarychallengeshighlightedinred.(a)Multi-round
+RAGemploys an iterative loop to retrieve large text chunks, but is hampered bycompression lossfrom vector
+embeddings andhigh token consumptionduring reasoning.(b) Graph RAGconstructs a knowledge graph to
+retrieve answers, but is vulnerable toentity ambiguityduring creation andretrieval redundancyfrom high-degree
+nodes.(c)T 2RAGdecomposesaqueryintotripletswith“?” placeholdersanditerativelyresolvesthembyretrieving
+evidence from a triplet database (DB) until all of them are resolved.
+of offline knowledge graph construction. Instead
+of building an explicit graph, T2RAG operates on
+a graph-free knowledge base of atomic proposi-
+tions, thus avoiding the high indexing costs and
+potential for retrieval errors caused by inaccurate
+graph links.Simultaneously, it tackles the exces-
+sive token consumption and latency that plagues
+Multi-round RAG systems. Rather than generat-
+ing verbose, natural language reasoning chains at
+each step, T2RAG leverages the LLM to think in a
+more structured, efficient manner. It expands com-
+plex questions into “searchable triplets” containing
+specific placeholders for unknown entities. The
+system then iteratively retrieves context to resolve
+these triplets. This design maintains a lean, struc-
+tured state transition between iterations, passing
+only compact triplets instead of verbose text. This
+triplet-centric design ensures a tight coupling be-
+tween retrieval and reasoning, retaining powerful
+multi-hop capabilities while dramatically reducing
+token overhead and enhancing performance. Our
+main contributions are as follows:
+• We introduce a novel RAG framework that di-
+rectly leverages triplets as the fundamental unit
+forindexing,retrieval,andreasoning,movingbe-
+yond the limitations of chunk-based and explicit
+graph-based approaches.
+• We demonstrate that our method achieves state-
+of-the-art performance on various types of QA
+benchmarks, outperforming leading models in
+both the Multi-Round RAG and Graph RAG.
+• We also significantly improve the efficiency. Our
+method reduces inference time and token con-
+sumption by up to 45% compared to other multi-
+round methods and even achieves an efficiency
+comparable to that of single-round approaches.
+2 Preliminaries
+The task of open-domain question answering
+(ODQA) was formally introduced in the 1999 Text
+REtrieval Conference (TREC) QA track (Voorhees
+andTice,2000). Initially,itwasdefinedasafactoid
+QA task: Given a large corpus of unstructured doc-
+uments, the goal was to extract a small text snippet
+containing the correct answer to a factual question.
+While the scope of ODQA has since expanded
+to include summarization and open-ended (Reja
+et al., 2003) tasks (Edge et al., 2024; Xiang et al.,
+2025), factoid QA remains a significant challenge,
+evidenced by poor performance (below 50%) on
+complex,multi-hopdatasetslikeMusiQue(Trivedi
+et al., 2023). Consequently, this paper focuses on
+advancing the state-of-the-art in factoid QA.
+FactoidQATask.Assumeourcollectioncontains
+𝐷documents 𝑑1,𝑑2,...,𝑑 𝐷. We split each docu-
+ment into passages of equal token length or apply-
+ing expert split if it exists, yielding𝑀total chunks
+C={𝑐 1,𝑐2,...,𝑐 𝑀}, where each chunk𝑐𝑖 can be
+2
+26283
+
+========== PDF PAGE 3 / 27 ==========
+viewed as a token sequence(𝑤(𝑖)
+1 ,𝑤(𝑖)
+2 ,...,𝑤 (𝑖)
+|𝑐𝑖 |).
+Givenaquestion 𝑞,thegoalistofindacombination
+of tokens(𝑤(𝑗)
+𝑐𝑚 ,...,𝑤 (𝑗)
+𝑐𝑚+𝑘 )drawn from multiple
+chunks that collectively contain the information
+necessary to answer𝑞while minimizing irrelevant
+noise to avoid hallucination. The answer must be
+exact one entityin our setting, such as persons,
+organizations, or locations or yes/no. Typically, a
+retriever 𝑅:(𝑞,C)→C 𝐹 is a function that takes
+a question 𝑞 and the corpusC as input and re-
+turns a much smaller set of chunksC𝐹 ⊂C , where
+|C𝐹|=𝑘≪|C| . For a fixed𝑘, a retriever can be
+evaluatedinisolationusingtop- 𝑘retrievalaccuracy
+with respect to labeled golden chunks.
+RetrievalGranularity.Theprecedingformulation
+assumes the retrieval unit is the chunk, which is a
+commonsetting(Karpukhinetal.,2020). However,
+recent works especially Guo et al. (2024); Fan
+et al. (2025) argue that chunks often contain a
+mix of relevant and irrelevant details, and a finer
+granularity is needed for complex queries (Zhang
+et al., 2024b). Inspired by work in Knowledge
+Graphs(KGs)(Jietal.,2021),thefundamentalunit
+ofretrievalcanberefinedtomoreatomicelements:
+• Entities (𝑒(𝑖)
+1 ,𝑒(𝑖)
+2 ,...,𝑒 (𝑖)
+|𝑐𝑖 |): Named entities
+such as persons, organizations, or locations.
+• Triplets (𝑡(𝑖)
+1 ,𝑡(𝑖)
+2 ,...,𝑡 (𝑖)
+|𝑐𝑖 |): Structured facts
+represented as a (subject,predicate,object) tuple.
+• Propositions (𝑝(𝑖)
+1 ,𝑝 (𝑖)
+2 ,...,𝑝 (𝑖)
+|𝑐𝑖 |): Atomic
+statements or facts, often by converting triplets
+into natural language sentences.
+Propositions, which encapsulate a complete fact
+in a single sentence, are often considered to have
+greater semantic utility for modern embedding
+models compared to isolated entities or triplets
+(Zhang et al., 2024b). Our work explores this fine-
+grainedunitsforimprovedretrievalandreasoning.
+3 Related Work
+We group recent RAG efforts intomulti-round, and
+graph-enhancedRAG, each adding more interac-
+tion or structured reasoning and paving the way for
+the fine-grained design of T2RAG.
+Multi-round RAG.Due to missing intermediate
+entities problem we mentioned in Section 1 more
+and more works follow a multi-round paradigm,
+which enables the LLMs infer the intermediate
+information thus better retrieve the final answer.
+Some works focus on the query side. Khot
+et al. (2023) decompose multi-hop questions into
+single-hop sub-queries that are solved sequentially.
+Yao et al. (2023) propose ReAct, interleaving
+chain-of-thought (CoT) (Wei et al., 2022) steps
+with search actions issued by the LLM. Similarly,
+Query2Doc(Wangetal.,2023b)expandingqueries
+into concise triplets to cut token usage while pre-
+serving recall. Another line of works relies on
+the generated intermediate results for next itera-
+tion. Beam Retrieval (Zhang et al., 2024a) jointly
+training an encoder and classifiers to keep mul-
+tiple passage hypotheses across hops. FLARE
+(Jiang et al., 2023) forecasts upcoming sentences
+to decide when fresh retrieval is needed during
+long-form generation. IRCoT (Trivedi et al., 2023)
+andITER-RETGEN(Shaoetal.,2023),alternately
+expanding a CoT and fetching new evidence to an-
+swermulti-stepquestions. AdaptiveQA(Xieetal.,
+2023) create an adaptive framework that picks the
+simplest effective retrieval strategy according to
+query complexity.Despite these advances, few ef-
+fortsexplicitlyaimtoreducetokencostsornumber
+of LLM calls during multi-round RAG. Previous
+methods expand query or generates CoT with long
+sentences in each round. In contrast, our work
+minimizestokenconsumptionbyformulatingquery
+expansions as triplets and simplifying reasoning
+steps as triplets resolving.
+Graph RAG.A significant line of research ap-
+proaches ODQA by structuring knowledge into
+graphs, subsequently adopting methods from
+Knowledge Graph QA (KGQA) (Ma et al., 2025).
+EarlyKGQAmethodsprimarilyfocusedondecom-
+posing queries or performing multi-round, LLM-
+evaluated traversals starting from seed nodes (Luo
+et al., 2024; Sun et al., 2024; Cheng et al., 2024;
+Mavromatis and Karypis, 2022). Other works rely
+on training specialized retrievers (Li et al., 2025;
+Lei et al., 2025), GNN models (Mavromatis and
+Karypis, 2024), or LLMs (Tian et al., 2024) to
+achieve accurate retrieval. However, ODQA is
+distinct from KGQA in two key aspects: 1) it is
+fundamentally grounded in unstructured text, and
+2) it prioritizes final answering accuracy over pure
+retrieval precision, as it allows to use knowledge
+inherent in the LLM. Semi-Structured CoT ad-
+dresses ODQA by combining IRCoT and KGQA
+methods to generate reasoning chains that feature
+a single, fixed placeholder resolved by KG tech-
+niques (Su et al., 2024). The application of this
+paradigm to general ODQA was popularized by
+systems named GraphRAG (Edge et al., 2024) that
+construct a knowledge graph entirely with LLMs
+and use community detection for hierarchical sum-
+marization and retrieval. Subsequent work has
+aimed to make this process more efficient. For
+instance,LightRAG(Guoetal.,2024)introducesa
+3
+26284
+
+========== PDF PAGE 4 / 27 ==========
+dual-level retrieval system combining graph struc-
+tures with vector search to improve knowledge dis-
+covery. Targeting resource-constrained scenarios,
+MiniRAG(Fanetal.,2025)buildsaheterogeneous
+graph of text chunks and named entities, enabling
+lightweight retrieval suitable for Small Language
+Models. To tackle the common challenge of en-
+tity merging, HippoRAG (Gutiérrez et al., 2025a)
+and HippoRAG2 (Gutiérrez et al., 2025b) create
+synonym links between similar entity nodes and
+employs a PageRank (Haveliwala, 1999) algorithm
+for final node selection.Despite these advances, a
+centralchallengeforGraphRAGremainsthecostly
+and error-prone nature of graph construction from
+unstructured text.
+Our method, T2RAG, skips the costly and error-
+prone graph construction required by Graph RAG
+while retains the multi-hop reasoning power by
+Multi-round RAG. It also dramatically reduces to-
+kenoverheadbyconstrainingbothqueryexpansion
+and intermediate generation. Besides, some works
+in ODQA such as GEAR (Shen et al., 2024) also
+employatripletsearchcomponent. Thesemethods
+typically rely on neighbor expansion, which in-
+volves retrieving all other triplets that share a head
+or tail entity. A key drawback of this approach is
+that accurately identifying and linking the same
+entity across different contexts is often inaccurate
+and computationally expensive.
+4 Methodology
+4.1 Overview
+Our proposed method,T 2RAG(Triplet-driven
+ThinkingRAG), is a novel paradigm for resolving
+complex, multi-hop, factoid QA tasks. Unlike con-
+ventionalRAGsystemsthatoperateoncoarserdoc-
+umentchunksorcomplexgraphstructures,T 2RAG
+is designed to operate directly on atomic knowl-
+edge propositions derived from triplets, fostering
+an intrinsic alignment between knowledge repre-
+sentation and LLM reasoning. This framework
+operates in two stages: an offline indexing focused
+on systematic knowledge distillation, and an on-
+line retrieval characterized by iterative, adaptive
+triplet resolution. This principled design ensures
+both fine-grained retrieval for accuracy and a lean,
+efficient reasoning process.
+4.2 Offline Indexing: Constructing a
+Graph-Free Knowledge Base
+Thegoaloftheofflinestageistotransformarawtext
+corpus C into a efficiently searchable knowledge
+base of atomic propositions. The motivation for
+adoptingproposition levelgranularity is two fold:
+1) Compared to the entity level, each proposition
+encodesanentire,unambiguousfact. 2)Compared
+to the chunk level, it also avoids the compression
+loss hindering the retrieval of details.
+Canonical Triplet Generation.For each docu-
+ment chunk𝑐𝑖 ∈C , we employ an information
+extraction model,𝐿𝐿𝑀𝐼𝐸(·), to identify key facts.
+This model performs Open Information Extraction
+(OpenIE) (Martinez-Rodriguez et al., 2018) to ex-
+tractasetofknowledgetriplets T𝑖 ={𝑡 (𝑖)
+1 ,𝑡(𝑖)
+2 ,...} .
+Eachtriplet 𝑡(𝑖)
+𝑗 isformalizedasacanonicalknowl-
+edgetriplet (𝑠𝑢𝑏𝑗𝑒𝑐𝑡,𝑝𝑟𝑒𝑑𝑖𝑐𝑎𝑡𝑒,𝑜𝑏𝑗𝑒𝑐𝑡) thatrep-
+resents a single factual statement. All extracted
+triplets are then aggregated into a global set for the
+entirecorpus T𝑡𝑜𝑡𝑎𝑙 = Ð𝑀
+𝑖=1 T𝑖,where 𝑀isthetotal
+number of extracted triplets.To demonstrate the
+power of using triplets as a foundational unit, we
+employ an off-the-shelf triplet generation method.
+While developing a more accurate and comprehen-
+sive extraction technique is outside the scope of
+this work, we provide a detailed error analysis of
+the method used in the Appendix B.8
+Triplet Embedding.To render these canonical
+triplets semantically actionable for dense retrieval,
+we are inspired by verbalization techniques (Oguz
+et al., 2020; Baek et al., 2023) to convert each
+triplet 𝑡∈T 𝑡𝑜𝑡𝑎𝑙 into a natural language sentence,
+termed aproposition 𝑝, simply by concatenating
+its components (e.g., “subject predicate object”).
+This seemingly straightforward verbalization is a
+deliberatedesignchoice: itmaximizesthesemantic
+utility for embedding models, facilitating effective
+andcontextuallyrichretrievalcomparedtoisolated
+entities.
+Triplet Vector DB Construction.The resulting
+flat list of propositionsP𝑡𝑜𝑡𝑎𝑙 ={𝑝 1,𝑝2,...,𝑝 𝑀}
+is then encoded into dense vector representations
+using a high-performance embedding model𝐸(·).
+For efficient real-time access, these vectors can
+be subsequently indexed using a highly optimized
+vector search library (FAISS) (Douze et al., 2024),
+creating an indexI that enables rapid similarity
+search across all propositions in the corpus. This
+vector DB is still calledTriplet Vector DBas it
+keeps original text of triplets. We also save the
+mappingfrom those propositions to their source
+chunksbecausetheoriginaltextisprovednecessary
+inmostofGraphRAGworks(Guoetal.,2024;Fan
+et al., 2025). This pre-computation creates a fine-
+grained, semantically enriched knowledge index
+without the overhead of explicit graph structures.
+The constructed proposition index, while of-
+fering significant advantages in terms of cost and
+4
+26285
+
+========== PDF PAGE 5 / 27 ==========
+Question
+Resolved Triplets 
+(with no“?”)
+Step 1: Structured Query
+Decomposition
+Step 2: Multi-round 
+Triplet Resolution 
+with Triplet Retrieval
+Searchable Triplets 
+(with one“?”)
+Fuzzy Triplets
+(with two or more “?”)
+Total Resolved Triplets AnswerStep 3: Final Answering
+Triplet 
+Vector 
+DB
+Question+
+Searchable Triplets
+Resolve
+Resolved Triplets 
+OR
+Resolved Triplets 
+Resolve
+Triplet 
+Vector 
+DB
+Figure 2: Online retrieval stage.
+constructionfidelity,introducesacriticalchallenge:
+howtoeffectivelynavigatecomplex,multi-hopques-
+tionsthat typicallyrely ongraph traversals?Inthe
+subsequent subsection, we introduce our novel on-
+line retrieval stage, where the LLM’s triplet-driven
+thinking and adaptive iterative resolution strategi-
+cally compensate for the graph traversals and the
+path-based reasoning.
+4.3 Online Retrieval: Iterative Triplets
+Resolution
+Theonlineretrievalstageisaniterativeprocessthat
+dynamically builds the context containing both the
+triplets and chunks needed to answer user queries.
+The overall retrieval process is shown in Figure 2.
+Step1: StructuredQueryDecomposition.Given
+aninitialquery 𝑞,wefirstuseanLLMtoperforma
+structureddecompositionwheretheLLMidentifies
+the specific, atomic knowledge Triplets (denoted
+as T𝑞) that must be answered to address the overall
+query. Critically, these derived triplets contain
+explicit placeholders (‘?’) for unknown entities.
+Based on the precise number of these placeholders,
+we categorize these initial triplets into three types:
+• Resolved Triplets(Tresolved): Triplets withzero
+placeholders, representing fully known facts that
+require no further search.
+• Searchable Triplets(Tsearchable): Triplets with
+exactlyoneplaceholder. This specificity, with
+two known elements, facilitates focused and ac-
+curate searches.
+• Fuzzy Triplets(Tfuzzy): Triplets with two or
+more placeholders. These are inherently too am-
+biguous for search with the at most one element.
+It requires resolution in subsequent iterations to
+upgrade tosearchableorresolved.
+This explicit categorization ensures that later re-
+trieval efforts are always focused and efficient.
+Step 2: Multi-Round Triplet Resolution with
+Triplet Retrieval.In this step, we will resolve
+the query triplets, i.e., try to eliminate all "?"
+placeholders step by step by RAG. Considering
+different complexity of queries and their triplets,
+we adopt an adaptive retrieval strategy instead of
+a fixed top-𝑘. We also observed most of multi-
+hop questions cannot be specifically retrieved by
+the query itself as illustrated in Figure 1, which
+necessitate the multi-round paradigm.
+Step 2.1: Triplet-Based Adaptive Retrieval.
+The current set of searchable tripletsT (𝑙)
+searchable are
+first converted intoquery propositionsby simply
+concatenatingtheelementswithouttheplaceholder.
+These propositions are then embedded, using the
+same embedding model𝐸(·)in the indexing stage,
+and used to query the proposition indexI. Unlike
+priormethodsthatretrieveafixedtop- 𝑘ofproposi-
+tionsortriplets(Baeketal.,2023;Guoetal.,2024),
+our retrieval process is critically adaptive in two
+synergisticwaystoensurebothrelevanceandinfor-
+mationaldiversity:First,ourmethodretrieveswith
+the triplets while constrain the number of triplets
+by chunks. More specifically, the retrieval contin-
+ues until context from𝑘unique source chunks of
+triplets has been retrieved.Second, we aggregate
+retrievalcandidatesfromallquerypropositionsinto
+a unified pool, ranking them globally by similarity
+scores, rather than allocating separate budgets to
+each proposition. These adaptive strategies ensure
+robustness to varying query complexity, allowing
+difficult questions to naturally draw from a wider
+range of propositions. Finally, the retrieval process
+returns the set of retrieved propositionsP(𝑙)
+retrieved
+and their corresponding chunksC(𝑙)
+retrieved. The ne-
+cessity of reading original chunks to complete de-
+tails missing from triplets is widely acknowledged
+in the field (Fan et al., 2025; Guo et al., 2024).
+Step 2.2: Resolving Triplets with Retrieved
+Context.This step leverages the retrieved content
+to advance the query’s resolution. We prompt the
+LLM to populate the placeholders within these
+triplets using the provided context. The retrieved
+propositions(P (𝑙)
+retrieved)andandtheirsourcechunks
+(C(𝑙)
+retrieved)serveascontextforanLLMcall. Thisis
+designed to either upgrade a searchable triplet to a
+fullyresolvedonebyfillinginitssingleplaceholder,
+or to transform a fuzzy triplet into a searchable or
+directlytoaresolvedonebyfillinginoneormoreof
+its multiple placeholders. This resolution process
+reducestheambiguityofexistingtripletsandmakes
+it suitable for subsequent targeted retrieval. The
+processisshowninFigure2andadetailedexample
+is in Appendix E.
+Step 2.3: State Update.Following the triplet
+resolutionstep,thesystemupdatesitsinternalstate
+5
+26286
+
+========== PDF PAGE 6 / 27 ==========
+for the subsequent iteration. The collection of
+resolved tripletsis monotonically augmented with
+any facts verified in the current round. Crucially,
+to maintain a focused retrieval scope, the system
+targets only thenewly searchable tripletsfor the
+next iteration, rather than re-scanning previous
+searchable triplets. Simultaneously, the queue of
+fuzzy tripletsis updated by pruning any items that
+were either successfully resolved or promoted to
+a searchable state in the current round. In cases
+where no searchable triplets are identified, the
+system employs afallback mechanismto ensure
+robustness. Itutilizestheembeddingofthecurrent
+natural language query to perform dense retrieval
+directly against the triplet vector database.
+This highly structured transition is central to our
+method’s efficiency. By passing compact triplets
+between iterations—rather than the verbose Chain-
+of-Thought reasoning used by approaches like IR-
+CoT—wedramaticallyreducetokenoverhead. Fur-
+thermore, this design creates a powerful synergy:
+the LLM generates reasoning gaps in the same
+format (triplets) as the retrieval index, ensuring
+strong semantic alignment between the resolution
+and retrieval stages.
+Step 2.4: Termination and Final Answer Syn-
+thesis.The iterative loop continues until one of
+three conditions is met: (1) the queues for both
+searchable and fuzzy triplets are empty, indicat-
+ing the reasoning chain is complete; (2) no newly
+searchable triplets are generated and no remaining
+fuzzy triplets, triggering an early stop; or (3) a
+pre-defined maximum number of iterations (𝑁) is
+reached. Upon termination, the system aggregates
+the verified facts to generate the final answer via
+one of two pathways:(a) Successful Completion:
+If the loop terminates naturally because all triplets
+were resolved, the LLM generates the answer con-
+ditioned on the original query and the set of fully
+resolved triplets.(b) Forced Termination (Early
+StoporMaxLimit):Iftheprocesshaltsduetothe
+iteration limit or a failure to generate new search-
+abletriplets,thesystemconstructsthebestpossible
+contextbycombiningallaccumulatedtriplets(both
+resolved and remaining searchable ones).
+By grounding the final generation primarily in
+verified, structured data rather than raw retrieved
+textchunks,thismethodminimizestokenconsump-
+tion and reduces the risk of hallucination.
+Examplification:To illustrate the retrieval and
+resolution flow of T2RAG, we trace the resolution
+of the query:"Who is the child of the performer of
+Me And Bobby McGee?"
+Step 2.1: Triplet-Based Adaptive Retrieval.Hav-
+ing previously resolved ?performer to "Roger
+Miller," the system generates the searchable triplet
+(Roger Miller,child,?child). This is converted
+intothequeryproposition"RogerMillerchild"and
+embedded to query indexI. The system retrieves
+the top chunksCretrieved containing biographical
+data on Roger Miller’s family.
+Step 2.2: Resolving Triplets with Retrieved
+Context.The LLM receives the context:
+"...Roger Miller’s son, Dean Miller, followed
+in his father’s footsteps...". By aligning this
+text with the placeholder, the system upgrades
+the searchable triplet to the resolved state:
+(Roger Miller,child,Dean Miller).
+Step 2.3: State Update.The fact
+(Roger Miller,child,Dean Miller)is moved to the
+verified facts set. The queue for searchable triplets
+becomes empty, and no new fuzzy triplets remain.
+This state triggers Step 2.4, where the system syn-
+thesizes the final answer "Dean Miller" using the
+grounded, resolved triplet.
+5 Experiments
+5.1 Datasets
+To ensure a comprehensive evaluation, we select
+representative datasets for three distinct Open-
+Domain Question Answering (ODQA) categories:
+Simple QA, Multi-hop QA, and Domain-specific
+QA. For the first two categories, we follow the
+experimental setup from HippoRAG2 (Gutiérrez
+et al., 2025b). We use PopQA (Mallen et al.,
+2023) for simple questions. For multi-hop ques-
+tions, we use 2Wiki-MultihopQA (2Wiki) (Ho
+et al., 2020), MuSiQue (Trivedi et al., 2022),
+and HotpotQA (Yang et al., 2018). For each
+of these datasets, we use the same sample of
+1,000 questions as the prior work (Gutiérrez et al.,
+2025b). For domain-specific evaluation, we adapt
+two datasets from the GraphRAG-Bench (Xiang
+et al., 2025). We isolate the factoid questions from
+the two datasets, Story and Medical, and use an
+LLMtoshortentheground-truthanswers,enabling
+more precise evaluation. Detailed statistics for all
+datasets are provided in Table 3.
+5.2 Baselines and Implementation Details
+To evaluate our approach, we select three strong
+baselines representing state-of-the-art methods
+across major RAG categories. For Graph RAG,
+we chooseHippoRAG2(Gutiérrez et al., 2025b)
+for its recognized efficiency and effectiveness. For
+summarization-basedRAG,weuseRaptor(Sarthi
+et al., 2024), a pioneering method that outper-
+formsmostGraphRAGapproachesinrecentbench-
+6
+26287
+
+========== PDF PAGE 7 / 27 ==========
+marks (Zhou et al., 2025). Lastly, for Multi-Round
+RAG, we include the prominentIRCoT(Trivedi
+et al., 2023) method.NORis the non-retrieval
+method that directly answers the question.Stan-
+dardRAG retrieves chunks with an embedding
+model and uses them to generate an answer.
+To ensure a fair comparison, all methods are
+configured with the same foundational models:
+NV-Embed-v2 (Lee et al., 2024) for embeddings
+and either Gemini-2.5-flash or GPT-4o-mini as the
+LLM for all offline indexing and online retrieval
+stages. For datasets lacking expert annotations,
+we employ a standard chunking strategy of 1200
+tokens with a 100-token overlap. For the top-𝑘
+of chunk retrieval, we set𝑘=5 for all methods.
+For the multi-round methods (T2RAG and IRCoT),
+we set a maximum of𝑁=3 iterations and keeps
+the 𝑘=5 in each iteration. Following standard
+practices (Trivedi et al., 2023), we evaluate end-to-
+end QA performance using Exact Match (EM) and
+F1 scores. We focus specifically on these end-to-
+endQAmetrics,asretrievalperformanceisdifficult
+to compare directly when the number of retrieved
+passages is adaptive. Except for the performance
+comparisons,allresultspresentedinthesubsequent
+sections are obtained using GPT-4o-mini. Details
+are available in Appendix B.
+5.3 Results
+We unfold our analysis of experimental results by
+answering Research Questions (RQ) below.
+RQ1: How does T2RAG perform against base-
+lines?As shown Table 1, T2RAG achieves state-
+of-the-art performance, stems from several key
+advantages.First, our method achieves state-of-
+the-artoverallperformance,leadinginbothaverage
+EM and F1 scores across the two LLM backbones,
+except for the second place in F1 by GPT-4o-mini.
+Notably, its advantage in EM is particularly pro-
+nounced, a strength we attribute to the precision of
+our triplet-based retrieval, which excels at identify-
+ing the exact entities required for factoid QA. This
+adaptability is further demonstrated by its consis-
+tently strong results on domain-specific datasets,
+underscoring the universality of the underlying rea-
+soning framework.Second, its superiority is most
+pronounced on Multi-hop QA datasets like 2Wiki.
+It not only surpasses all single-round baselines
+by a large margin but also outperforms the multi-
+round baseline, IRCoT, by over 7.7% and 5.4%
+in EM with Gemini-2.5-flash and GPT-4o-mini,
+respectively. This highlights the effectiveness of
+its triplet-driven mechanism for complex reason-
+ing.Finally, the method demonstrates a powerful
+synergy with reasoning LLMs. Its performance
+is significantly higher when paired with Gemini-
+2.5-flash compared to GPT-4o-mini. As shown in
+Figure8,weextendtheexperimentson2reasoning
+LLMs (Gemini-2.5-flash and Gemini-2.5-pro) and
+2 non-reasoning LLMs (GPT-4o-mini and Qwen3-
+Next-Instruct(Yanget al.,2025)). Wecomparethe
+averaged EM and F1 score on PopQA dataset. The
+results suggest that our method can uniquely lever-
+age the advancedreasoning capabilitiesof such
+models through its step-by-step guidance. Con-
+versely, certain methods such as HippoRAG2 ex-
+hibit a decrease in performance when employing
+reasoning LLMs. We hypothesize this occurs be-
+cause relegating the LLM to a simple filtering task
+does not fully harness its reasoning capabilities.
+Results on more datasets are in Appendix B.3.
+RQ2: What is the impact of the triplet resolu-
+tionmodule?Tovalidatetheeffectivenessofour
+core "triplet-driven thinking" design, we analyze
+the final performance based on whether a query’s
+underlying triplets are fully resolved. Figure 4 re-
+vealsasignificantperformancedeltabetweenthese
+two outcomes. Across all three datasets, there
+is a strong correlation between successful triplet
+resolution and high performance. For instance,
+on the 2Wiki dataset, the F1 score for unresolved
+questions drops to 53% from 76%, with a similar
+sharp decline observed in EM scores. This result
+confirms that resolving all triplets is the key to
+success. We also use LLM to do an error anal-
+ysis of the incorrect answer. Results shows the
+missing retrieval leads the reason of error and the
+hallucination is as low as 2%. The details are in
+Appendix B.9.
+RQ3: Which components of T2RAG are impor-
+tant?Weconductedanablationstudytoquantify
+thecontributionofitstwokeycomponents. There-
+sultsinTable5revealthatboththeiterativeprocess
+and the use of chunks are important. The iterative
+reasoningmoduleprovestobeacriticalcomponent.
+Removing it (- single round) causes a significant
+performancedegradation,particularlyonmulti-hop
+QA. For instance, F1 score on MuSiQue drops by
+a remarkable 54.5%. This demonstrates that the
+multi-round retrieval and resolution is essential
+for decomposing and solving complex problems.
+Similarly, removing the raw chunk text during the
+iteration, i.e, (- w/o chunk), is also substantially
+harms performance, confirming that the raw text
+complement missing details of triplets. This obser-
+vation is aligned with Fan et al. (2025).
+RQ4: How does T2RAG compare in terms of
+computational efficiency?This analysis com-
+7
+26288
+
+========== PDF PAGE 8 / 27 ==========
+Table 1: Main performance comparison on various types of QA datasets, showing Exact Match / F1 scores×100.
+The best result in each column is inbold, and the second best isunderlined. Bootstrap testing is used to assess
+significance with 5,000 times repeat. The dagger symbol (†) indicates that our method significantly outperforms the
+best baseline (IRCoT under Gemini-2.5-flash and HippoRAG2 under GPT-4o-mini) with a p-value less than 0.05.
+Simple QA Multi-Hop QA Domain-Specific QA Average
+MethodPopQA 2Wiki MuSiQue HotpotQA Story Medical EM F1
+Gemini-2.5-flash
+NOR 32.4 / 35.7 48.1 / 55.6 16.3 / 26.5 40.5 / 52.3 10.3 / 17.1 23.1 / 46.028.4 38.9BM25 50.2 / 55.6 28.2 / 30.7 7.9 / 10.7 40.8 / 49.3 26.2 / 35.3 22.2 / 37.829.3 36.6Standard 51.8 / 59.5 33.1 / 39.0 28.1 / 36.2 52.1 / 63.1 31.0 / 42.2 19.4 / 41.535.9 46.9HippoRAG2 52.1 / 60.144.3 / 51.2 29.1 / 38.3 52.1 / 64.1 33.1 / 44.1 27.8 / 58.239.8 52.7RAPTOR 52.3/ 56.8 36.3 / 41.1 31.8 / 39.7 60.9 / 72.7 46.2/ 59.0 34.2/ 58.1 43.6 54.6IRCoT 51.2 / 58.7 61.6 / 71.7 39.7/49.861.2/77.340.3 / 57.3 26.1 / 56.146.7 61.8
+T2RAG56.6 †/62.4† 69.3†/77.5† 39.1/ 49.162.3/ 73.246.7†/59.5† 36.0†/61.4† 51.7 63.9
+GPT-4o-mini
+NOR 28.7 / 31.4 28.0 / 34.1 10.2 / 20.3 28.8 / 38.6 11.5 / 18.9 19.3 / 44.221.1 31.3BM25 47.6 / 54.8 42.9 / 48.2 15.3 / 21.1 47.2 / 57.6 29.0 / 38.5 25.9 / 43.634.7 44.0Standard 51.9 / 60.0 53.1 / 60.2 31.2 / 44.3 58.0/ 71.1 27.3 /60.127.0 / 59.941.4 59.3HippoRAG2 52.2 / 60.259.6 / 69.3 34.1 /48.1 58.1/ 71.141.2 / 58.3 28.1 / 59.445.6 61.1RAPTOR 54.6/ 60.1 38.2 / 49.0 28.6 / 40.8 57.9 /71.4 44.8/ 59.636.7/63.7 43.5 57.4IRCoT 45.3 / 54.7 60.7 / 74.3 34.1/ 47.655.7 / 71.2 36.1 / 51.8 25.1 / 52.942.8 58.8
+T2RAG55.8 †/63.2† 66.7†/74.4† 34.3/ 45.6 54.2 / 67.3 38.7 / 50.1 33.5†/ 60.447.260.2
+Qwen3-Next-Instruct GPT-4o-mini Gemini 2.5 Flash
+ Gemini 2.5 Pro
+0.45
+0.50
+0.55
+0.60Average Score (EM & F1)
+0.535
+0.559 0.556
+0.551
+0.540
+0.562 0.560
+0.547
+0.518
+0.500
+0.549
+0.5410.542
+0.595 0.595
+0.583
+Standard
+HippoRAG2
+IRCoT
+T2RAG
+Figure3: PerformanceonPopQAacrossdifferentLLMs.
+Reasoning LLMs are inbold.
+PopQA 2Wiki MuSiQue0.0
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7Performance
+0.56
+0.69
+0.35
+0.62
+0.76
+0.47
+0.41 0.42
+0.20
+0.45
+0.53
+0.32
+EM (Resolved)
+F1 (Resolved)
+EM (Unresolved)
+F1 (Unresolved)
+Figure 4: Performance vs. final resolution status across
+three datasets.
+Figure 5: Ablation results
+PopQA 2Wiki MuSiQue
+Method EM F1 EM F1 EM F1
+T2RAG 56.0 63.0 66.0 74.0 33.0 45.0
+- single round54.8 60.5 51.0 59.0 15.0 24.0↓2.1%↓4.0%↓22.7%↓20.3%↓54.5%↓46.7%
+- w/o chunk41.1 44.7 62.0 68.0 21.6 29.9↓26.6%↓29.0%↓6.1%↓8.1%↓34.5%↓33.6%
+pares the computational cost of T2RAG with base-
+lines during both the one-time offline indexing and
+online retrieval phases. To better visualize the
+online costs, the token and time values for the re-
+trieval stage in Figure 6 are aggregated over 1,000
+queries, assuming they are processed sequentially.
+Figure 6 illustrates a strategic trade-off. During
+indexing stage, T2RAG’s token consumption ap-
+pears high because it processes the entire corpus
+into triplets.However, this processing is merely
+the first step for many advanced Graph RAG meth-
+ods (Edge et al., 2024; Guo et al., 2024; Fan et al.,
+2025). Their subsequent graph construction steps
+are far more costly.For example, LightRAG and
+GraphRAG require around 6×and 10×the token
+consumption of the initial triplet extraction phase,
+respectively (Gutiérrez et al., 2025b). T2RAG’s in-
+dexingoverheadremainshighlycompetitivewithin
+this category. At theretrieval stage, T2RAG is
+remarkably more efficient in both tokens and la-
+tency than the multi-round baseline, IRCoT. More
+notably, its efficiency is even comparable to single-
+round methods. This is because HippoRAG2 also
+invokes multiple LLM calls for filtering, while
+Raptor retrieves longer summaries than chunks.
+T2RAG’s efficiency stems from its design, which
+focuses on targeted search for triplets rather than
+processing large, noisy text chunks. In summary,
+T2RAG achieves an acceptable indexing cost to
+deliver a highly efficient online system.
+RQ5: How does performance scale with the
+amountofretrievedcontext?Toinvestigatehow
+T2RAG’s performance scales with context size,
+we compare it against other multi-round methods
+while varying the number of retrieved documents
+(top-𝑘). Traditional RAG methods often rely on
+retrieving more context to find the correct answer,
+which can be inefficient. The trend in Figure 7
+shows T2RAG’s performance is consistently high
+and robust to the value of top-𝑘. It achieves the
+plateau (0.7) faster than other methods. In contrast,
+8
+26289
+
+========== PDF PAGE 9 / 27 ==========
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+LightRAG*GraphRAG*
+0
+1
+2
+3
+Token Consumption
+×108 HotpotQA
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+0
+1
+2
+3
+×107 Medical
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+LightRAG*GraphRAG*
+0.00
+0.25
+0.50
+0.75
+1.00
+1.25
+Time (s)
+×105
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+0
+2
+4
+6
+8
+×103
+Indexing Stage Retrieval Stage
+Figure 6: Token consumption equals to (input +
+4×output). Transparent bars are from Zhou et al.
+(2025).
+2 3 4 5 6 7 8 9 10
+Effective Top-k
+0.50
+0.55
+0.60
+0.65
+0.70
+0.75Averaged EM & F1
+Standard
+HippoRAG2
+T2RAG
+IRCoT
+Figure 7: Performance on 2Wiki vs. top-𝑘. Multi-round
+methodsarecalibratedby 𝑘×averagenumberofiterations.
+baselines like IRCoT and HippoRAG2 exhibit a
+strongdependenceonalargercontextwindow. This
+observation demonstrates its effectiveness does not
+rely on scaling up the volume of retrieved text but
+a more precise and specific triplet-based retrieval.
+6 Conclusion
+In this work, we proposed the Triplet-driven Think-
+ingRAG(T 2RAG),anovelframeworkthatembeds
+reasoning directly into the retrieval process. By
+decomposing complex queries into atomic triplets
+and resolving them step-by-step against a triplet
+knowledge base, our method consistently outper-
+formsmorecomplexlydesignedRAGsystems. Our
+extensive experiments demonstrate that T2RAG es-
+tablishes a new state-of-the-art in factoid QA tasks,
+particularly on challenging multi-hop QA. This su-
+periorperformanceisachievedwithremarkableon-
+line efficiency; the retrieval stage has significantly
+lower time and token consumption compared to
+other multi-round methods and maintains a com-
+parable overhead to even single-round approaches.
+Furthermore, our results reveal a powerful synergy
+between T2RAG’s structured thinking process and
+thecapabilitiesofadvancedreasoningLLMs,high-
+lighting a new path to unlock their full potential in
+this area. Looking forward, T2RAG paves the way
+for more accurate and efficient RAG systems by
+shifting the paradigm from retrieving and generat-
+ingunstructuredcontextstowardsamoredeliberate,
+reasoning-driven synthesis of atomic facts.
+7 Limitations
+Although our method achieves state-of-the-art per-
+formance with a simple design, it is not with-
+out limitations.Experimentally, we limited our
+multi-round methods to 3 iterations to match the
+complexity of the datasets and ensure a fair ef-
+ficiency comparison; we also did not have the
+resources to test on other embedding models espe-
+ciallyLLM-basedones,re-rankersorlargeexternal
+knowledge graphs (e.g., Wikipedia KG (Hertling
+and Paulheim, 2018)). Our evaluation is also lim-
+ited to the black-box and end-to-end one which
+may lack explanability without the recall score
+of chunks.Methodologically, our approach is
+highly dependent on the quality of the triplet ex-
+traction. While higher-quality sources can be used,
+simple triplets may not adequately represent com-
+plex knowledge like many-to-many relationships,
+a challenge that could be addressed with hyper-
+graph modeling (Luo et al., 2025) in future work.
+Besides, the efficiency of triplet extraction can
+be further improved beyond the classic OpenIE
+pipeline. Developing these methods needs efforts
+frominformationextraction(Grishman,2015)area.
+Additionally, regarding scalability, building the
+index from a very large corpus is token-intensive.
+However, our method is very efficient when using
+a pre-existing triplet database. This design also
+makesitinherentlysuitableforevolvingknowledge
+bases, as new triplets are independent to previous
+ones thus they can be added incrementally, offer-
+ing a significant advantage over static Graph RAG
+approaches (Zhang et al., 2025). Future work can
+alsobedoneforstudyingtheadversarialrobustness
+of the RAG system (Qi et al., 2026), unlearning
+problems (Geng et al., 2025; Liu et al., 2025a,b),
+andcompression(Hashemietal.,2024;Gongetal.,
+2025), given the evolving nature of knowledge
+bases.
+Acknowledgments
+This research is partially supported by the U.S.
+NationalScienceFoundationunderAwardNumber
+2504088. This research was partially supported
+by the internal funds and GPU servers provided
+9
+26290
+
+========== PDF PAGE 10 / 27 ==========
+by the Computer Science Department of Emory
+University. Carl Yang was partially supported by
+the US National Science Foundation under Award
+Numbers 2442172, 2312502, 2319449, and the US
+NationalInstitutesofHealthunderAwardNumbers
+K25DK135913, RF1NS139325, R01DK143456
+and U18DP006922.
+References
+Jinheon Baek, Alham Fikri Aji, Jens Lehmann, and
+Sung Ju Hwang. 2023. Direct Fact Retrieval from
+Knowledge Graphs without Entity Linking.arxiv.
+ArXiv:2305.12416 [cs].
+Ziwei Chai, Tianjie Zhang, Liang Wu, Kaiqiao Han,
+Xiaohai Hu, Xuanwen Huang, and Yang Yang. 2023.
+Graphllm: Boosting graph reasoning ability of large
+language model.arXiv preprint arXiv:2310.05845.
+Sitao Cheng, Ziyuan Zhuang, Yong Xu, Fangkai Yang,
+Chaoyun Zhang, Xiaoting Qin, Xiang Huang, Ling
+Chen, Qingwei Lin, Dongmei Zhang, Saravan Raj-
+mohan, and Qi Zhang. 2024. Call me when neces-
+sary: LLMs can efficiently and faithfully reason over
+structured environments. InFindings of the Asso-
+ciation for Computational Linguistics: ACL 2024,
+pages 4275–4295, Bangkok, Thailand. Association
+for Computational Linguistics.
+Matthijs Douze, Alexandr Guzhva, Chengqi Deng,
+Jeff Johnson, Gergely Szilvasy, Pierre-Emmanuel
+Mazaré, Maria Lomeli, Lucas Hosseini, and Hervé
+Jégou. 2024. The faiss library.arXiv preprint
+arXiv:2401.08281.
+DarrenEdge,HaTrinh,NewmanCheng,JoshuaBradley,
+AlexChao,ApurvaMody,StevenTruitt,andJonathan
+Larson. 2024. From Local to Global: A Graph
+RAG Approach to Query-Focused Summarization.
+ArXiv:2404.16130.
+Tianyu Fan, Jingyuan Wang, Xubin Ren, and Chao
+Huang. 2025. MiniRAG: Towards Extremely Simple
+Retrieval-Augmented Generation.
+Yunfan Gao, Yun Xiong, Xinyu Gao, Kangxiang Jia,
+Jinliu Pan, Yuxi Bi, Yixin Dai, Jiawei Sun, Haofen
+Wang,andHaofenWang.2023. Retrieval-augmented
+generation for large language models: A survey.
+arXiv preprint arXiv:2312.10997, 2(1).
+Jiahui Geng, Qing Li, Herbert Woisetschlaeger, Zongx-
+iong Chen, Fengyu Cai, Yuxia Wang, Preslav Nakov,
+Hans-Arno Jacobsen, and Fakhri Karray. 2025. A
+comprehensive survey of machine unlearning tech-
+niques for large language models.arXiv preprint
+arXiv:2503.01854.
+Parker Glenn, Parag Dakle, Liang Wang, and Preethi
+Raghavan.2024. Blendsql: Ascalabledialectforuni-
+fyinghybridquestionansweringinrelationalalgebra.
+InFindings of the Association for Computational
+Linguistics: ACL 2024, pages 453–466.
+Shengbo Gong, Mohammad Hashemi, Juntong Ni, Carl
+Yang, and Wei Jin. 2025. Scalable graph conden-
+sation with evolving capabilities.arXiv preprint
+arXiv:2502.17614.
+Ralph Grishman. 2015. Information extraction.IEEE
+Intelligent Systems, 30(5):8–15.
+Jia-Chen Gu, Hao-Xiang Xu, Jun-Yu Ma, Pan Lu, Zhen-
+Hua Ling, Kai-Wei Chang, and Nanyun Peng. 2024a.
+Model editing harms general abilities of large lan-
+guage models: Regularization to the rescue. In
+Proceedings of the 2024 Conference on Empirical
+Methods in Natural Language Processing, pages
+16801–16819, Miami, Florida, USA. Association for
+Computational Linguistics.
+Jiawei Gu, Xuhui Jiang, Zhichao Shi, Hexiang Tan,
+Xuehao Zhai, Chengjin Xu, Wei Li, Yinghan
+Shen, Shengjie Ma, Honghao Liu, and 1 others.
+2024b. A survey on llm-as-a-judge.arXiv preprint
+arXiv:2411.15594.
+Zirui Guo, Lianghao Xia, Yanhua Yu, Tu Ao, and Chao
+Huang. 2024. LightRAG: Simple and Fast Retrieval-
+Augmented Generation. ArXiv:2410.05779.
+Bernal Jiménez Gutiérrez, Yiheng Shu, Yu Gu, Michi-
+hiroYasunaga,andYuSu.2025a. HippoRAG:Neuro-
+biologically Inspired Long-Term Memory for Large
+Language Models.
+Bernal Jiménez Gutiérrez, Yiheng Shu, Weijian Qi,
+Sizhe Zhou, and Yu Su. 2025b. From RAG to Mem-
+ory: Non-Parametric Continual Learning for Large
+Language Models. ArXiv:2502.14802 [cs].
+HaoyuHan,YuWang,HarryShomer,KaiGuo,Jiayuan
+Ding,YongjiaLei,MahanteshHalappanavar,RyanA
+Rossi, Subhabrata Mukherjee, Xianfeng Tang, and 1
+others. 2024. Retrieval-augmented generation with
+graphs (graphrag).arXiv preprint arXiv:2501.00309.
+Mohammad Hashemi, Shengbo Gong, Juntong Ni,
+Wenqi Fan, B Aditya Prakash, and Wei Jin. 2024. A
+comprehensive survey on graph reduction: Sparsifi-
+cation, coarsening, and condensation.International
+Joint Conference on Artificial Intelligence (IJCAI).
+TaherHaveliwala.1999. Efficientcomputationofpager-
+ank. Technical report, Stanford.
+Sven Hertling and Heiko Paulheim. 2018. Dbkwik:
+A consolidated knowledge graph from thousands of
+wikis. In2018 IEEE International Conference on
+Big Knowledge (ICBK), pages 17–24. IEEE.
+Xanh Ho, Anh-Khoa Duong Nguyen, Saku Sugawara,
+and Akiko Aizawa. 2020. Constructing a multi-hop
+qadatasetforcomprehensiveevaluationofreasoning
+steps.arXiv preprint arXiv:2011.01060.
+JohannesHoffart,YaseminAltun,andGerhardWeikum.
+2014. Discoveringemergingentitieswithambiguous
+names. InProceedings of the 23rd international
+conference on World wide web, pages 385–396.
+10
+26291
+
+========== PDF PAGE 11 / 27 ==========
+Lei Huang, Weijiang Yu, Weitao Ma, Weihong Zhong,
+Zhangyin Feng, Haotian Wang, Qianglong Chen,
+Weihua Peng, Xiaocheng Feng, Bing Qin, and 1
+others. 2025. A survey on hallucination in large lan-
+guage models: Principles, taxonomy, challenges, and
+open questions.ACM Transactions on Information
+Systems, 43(2):1–55.
+Shaoxiong Ji, Shirui Pan, Erik Cambria, Pekka Martti-
+nen, and Philip S Yu. 2021. A survey on knowledge
+graphs: Representation,acquisition,andapplications.
+IEEE transactions on neural networks and learning
+systems, 33(2):494–514.
+Zhengbao Jiang, Frank F Xu, Luyu Gao, Zhiqing Sun,
+Qian Liu, Jane Dwivedi-Yu, Yiming Yang, Jamie
+Callan, and Graham Neubig. 2023. Active retrieval
+augmented generation. InProceedings of the 2023
+Conference on Empirical Methods in Natural Lan-
+guage Processing, pages 7969–7992.
+Vladimir Karpukhin, Barlas Oguz, Sewon Min,
+Patrick SH Lewis, Ledell Wu, Sergey Edunov, Danqi
+Chen, and Wen-tau Yih. 2020. Dense passage re-
+trieval for open-domain question answering. In
+EMNLP (1), pages 6769–6781.
+Omar Khattab and Matei Zaharia. 2020. Colbert: Effi-
+cient and effective passage search via contextualized
+late interaction over bert. InProceedings of the 43rd
+InternationalACMSIGIRconferenceonresearchand
+development in Information Retrieval, pages 39–48.
+TusharKhot,HarshTrivedi,MatthewFinlayson,YaoFu,
+Kyle Richardson, Peter Clark, and Ashish Sabharwal.
+2023. Decomposed prompting: A modular approach
+for solving complex tasks. InThe Eleventh Interna-
+tional Conference on Learning Representations.
+Chankyu Lee, Rajarshi Roy, Mengyao Xu, Jonathan
+Raiman, Mohammad Shoeybi, Bryan Catanzaro, and
+WeiPing.2024. Nv-embed: Improvedtechniquesfor
+training llms as generalist embedding models.arXiv
+preprint arXiv:2405.17428.
+YongjiaLei,HaoyuHan,RyanARossi,FranckDernon-
+court,NedimLipka,MahanteshMHalappanavar, Jil-
+iangTang,andYuWang.2025. Mixtureofstructural-
+and-textual retrieval over text-rich graph knowledge
+bases. InFindings of the Association for Computa-
+tional Linguistics: ACL 2025, pages 18306–18321.
+Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio
+Petroni,VladimirKarpukhin,NamanGoyal,Heinrich
+Küttler, Mike Lewis, Wen-tau Yih, Tim Rocktäschel,
+and 1 others. 2020. Retrieval-augmented generation
+for knowledge-intensive nlp tasks.Advances in neu-
+ral information processing systems, 33:9459–9474.
+Mufei Li, Siqi Miao, and Pan Li. 2025. Simple is effec-
+tive: The roles of graphs and large language models
+in knowledge-graph-based retrieval-augmented gen-
+eration. InInternational Conference on Learning
+Representations.
+Yezi Liu, Hanning Chen, Wenjun Huang, Yang Ni, and
+MohsenImani.2025a. Lune: Efficientllmunlearning
+via lora fine-tuning with negative examples.arXiv
+preprint arXiv:2512.07375.
+Yezi Liu, Hanning Chen, Wenjun Huang, Yang Ni, and
+Mohsen Imani. 2025b. Recover-to-forget: Gradient
+reconstruction from lora for efficient llm unlearning.
+arXiv preprint arXiv:2512.07374.
+Yezi Liu, William Youngwoo Chung, Hanning Chen,
+Calvin Yeung, and Mohsen Imani. 2025c. Are hy-
+pervectors enough? single-call llm reasoning over
+knowledge graphs.arXiv preprint arXiv:2512.09369.
+Zewen Liu, Juntong Ni, Xianfeng Tang, Max SY Lau,
+Wenpeng Yin, and Wei Jin. 2025d. Can large lan-
+guagemodelsadequatelyperformsymbolicreasoning
+over time series?arXiv preprint arXiv:2508.03963.
+Haoran Luo, Guanting Chen, Yandan Zheng, Xi-
+aobao Wu, Yikai Guo, Qika Lin, Yu Feng, Zemin
+Kuang, Meina Song, Yifan Zhu, and 1 others. 2025.
+Hypergraphrag: Retrieval-augmented generation
+via hypergraph-structured knowledge representation.
+arXiv preprint arXiv:2503.21322.
+Linhao Luo, Yuan-Fang Li, Gholamreza Haffari, and
+Shirui Pan. 2024. Reasoning on Graphs: Faithful
+and Interpretable Large Language Model Reasoning.
+Chuangtao Ma, Yongrui Chen, Tianxing Wu, Arijit
+Khan, and Haofen Wang. 2025. Large language
+models meet knowledge graphs for question answer-
+ing: Synthesis and opportunities.arXiv preprint
+arXiv:2505.20099.
+Alex Mallen, Akari Asai, Victor Zhong, Rajarshi Das,
+Daniel Khashabi, and Hannaneh Hajishirzi. 2023.
+When not to trust language models: Investigating
+effectivenessofparametricandnon-parametricmem-
+ories. InProceedings of the 61st Annual Meeting of
+the Association for Computational Linguistics (Vol-
+ume 1: Long Papers), pages 9802–9822, Toronto,
+Canada. Association for Computational Linguistics.
+Jose L Martinez-Rodriguez, Ivan López-Arévalo, and
+Ana B Rios-Alvarado. 2018. Openie-based approach
+for knowledge graph construction from text.Expert
+Systems with Applications, 113:339–355.
+CostasMavromatisandGeorgeKarypis.2022. ReaRev:
+Adaptive Reasoning for Question Answering over
+Knowledge Graphs.arxiv.
+Costas Mavromatis and George Karypis. 2024. GNN-
+RAG: Graph Neural Retrieval for Large Language
+Model Reasoning.
+Niklas Muennighoff, Nouamane Tazi, Loic Magne, and
+NilsReimers.2023. MTEB:Massivetextembedding
+benchmark. InProceedings of the 17th Conference
+of the European Chapter of the Association for Com-
+putational Linguistics, pages 2014–2037, Dubrovnik,
+Croatia. Association for Computational Linguistics.
+Yixin Nie, Songhe Wang, and Mohit Bansal. 2019.
+Revealing the importance of semantic retrieval for
+machine reading at scale. InProceedings of the
+2019 Conference on Empirical Methods in Natu-
+ral Language Processing and the 9th International
+Joint Conference on Natural Language Processing
+(EMNLP-IJCNLP), pages 2553–2566.
+11
+26292
+
+========== PDF PAGE 12 / 27 ==========
+Barlas Oguz, Xilun Chen, Vladimir Karpukhin, Stan
+Peshterliev, Dmytro Okhonko, Michael Schlichtkrull,
+Sonal Gupta, Yashar Mehdad, and Scott Yih. 2020.
+Unik-qa: Unified representations of structured and
+unstructured knowledge for open-domain question
+answering.arXiv preprint arXiv:2012.14610.
+Boci Peng, Yun Zhu, Yongchao Liu, Xiaohe Bo,
+HaizhouShi,ChuntaoHong,YanZhang, andSiliang
+Tang. 2024. Graph retrieval-augmented generation:
+A survey.arXiv preprint arXiv:2408.08921.
+Ofir Press, Muru Zhang, Sewon Min, Ludwig Schmidt,
+Noah A Smith, and Mike Lewis. 2023. Measuring
+and narrowing the compositionality gap in language
+models. InFindings of the Association for Computa-
+tional Linguistics: EMNLP 2023, pages 5687–5711.
+Zhisheng Qi, Utkarsh Sahu, Li Ma, Haoyu Han,
+Ryan Rossi, Franck Dernoncourt, Mahantesh Ha-
+lappanavar, Nesreen Ahmed, Yushun Dong, Yue
+Zhao, Yu Zhang, and Yu Wang. 2026. Bench-
+marking knowledge-extraction attack and defense
+on retrieval-augmented generation.arXiv preprint
+arXiv:2602.09319.
+UršaReja,KatjaLozarManfreda,ValentinaHlebec,and
+Vasja Vehovar. 2003. Open-ended vs. close-ended
+questions in web questionnaires.Developments in
+applied statistics, 19(1):159–177.
+Parth Sarthi, Salman Abdullah, Aditi Tuli, Shubh
+Khanna, Anna Goldie, and Christopher D Manning.
+2024. Raptor: Recursive abstractive processing for
+tree-organized retrieval. InThe TwelfthInternational
+Conference on Learning Representations.
+Kunal Sawarkar, Abhilasha Mangal, and Shivam Raj
+Solanki.2024. Blendedrag: Improvingrag(retriever-
+augmentedgeneration)accuracywithsemanticsearch
+and hybrid query-based retrievers. In2024 IEEE 7th
+international conference on multimedia information
+processing and retrieval (MIPR), pages 155–161.
+IEEE.
+Zhihong Shao, Yeyun Gong, Yelong Shen, Minlie
+Huang, Nan Duan, and Weizhu Chen. 2023. En-
+hancing retrieval-augmented large language models
+with iterative retrieval-generation synergy. InFind-
+ingsoftheAssociationforComputationalLinguistics:
+EMNLP 2023, pages 9248–9274.
+Zhili Shen, Chenxin Diao, Pavlos Vougiouklis, Pascual
+Merita, Shriram Piramanayagam, Damien Graux,
+Dandan Tu, Zeren Jiang, Ruofei Lai, Yang Ren,
+and 1 others. 2024. Gear: Graph-enhanced agent
+for retrieval-augmented generation.arXiv preprint
+arXiv:2412.18431.
+Xin Su, Tiep Le, Steven Bethard, and Phillip Howard.
+2024. Semi-structured chain-of-thought: Integrating
+multiple sources of knowledge for improved lan-
+guage model reasoning. InProceedings of the 2024
+Conference of the North American Chapter of the
+Association for Computational Linguistics: Human
+Language Technologies (Volume 1: Long Papers),
+pages 8589–8605.
+Jiashuo Sun, Chengjin Xu, Lumingyuan Tang, Saizhuo
+Wang, Chen Lin, Yeyun Gong, Lionel M. Ni, Heung-
+Yeung Shum, and Jian Guo. 2024. Think-on-Graph:
+Deep and Responsible Reasoning of Large Language
+Model on Knowledge Graph.
+Yixuan Tang and Yi Yang. 2024. MultiHop-RAG:
+Benchmarking Retrieval-Augmented Gener- ation
+for Multi-Hop Queries.arxiv.
+Shiyu Tian, Yangyang Luo, Tianze Xu, Caixia Yuan,
+Huixing Jiang, Chen Wei, and Xiaojie Wang. 2024.
+Kg-adapter: Enabling knowledge graph integration
+in large language models through parameter-efficient
+fine-tuning. InFindings of the Association for Com-
+putational Linguistics ACL 2024, pages 3813–3828.
+Harsh Trivedi, Niranjan Balasubramanian, Tushar Khot,
+and Ashish Sabharwal. 2022. Musique: Multihop
+questionsviasingle-hopquestioncomposition.Trans-
+actionsoftheAssociationforComputationalLinguis-
+tics, 10:539–554.
+Harsh Trivedi, Niranjan Balasubramanian, Tushar Khot,
+and Ashish Sabharwal. 2023. Interleaving Retrieval
+with Chain-of-Thought Reasoning for Knowledge-
+Intensive Multi-Step Questions. InProceedings of
+the 61st Annual Meeting of the Association for Com-
+putational Linguistics (Volume 1: Long Papers),
+pages 10014–10037, Toronto, Canada. Association
+for Computational Linguistics.
+EllenM.VoorheesandDawnM.Tice.2000. TheTREC-
+8 question answering track. InProceedings of the
+Second International Conference on Language Re-
+sources and Evaluation (LREC’00), Athens, Greece.
+European Language Resources Association (ELRA).
+Liang Wang, Ivano Lauriola, and Alessandro Moschitti.
+2023a. Accurate training of web-based question
+answering systems with feedback from ranked users.
+InProceedings of the 61st Annual Meeting of the
+Association for Computational Linguistics (Volume
+5: Industry Track), pages 660–667.
+Liang Wang, Nan Yang, and Furu Wei. 2023b.
+Query2doc: Query Expansion with Large Language
+Models.
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+and 1 others. 2022. Chain-of-thought prompting
+elicits reasoning in large language models.Advances
+in neural information processing systems, 35:24824–
+24837.
+Yike Wu, Nan Hu, Sheng Bi, Guilin Qi, Jie Ren, An-
+huan Xie, and Wei Song. 2023. Retrieve-Rewrite-
+Answer: A KG-to-Text Enhanced LLMs Framework
+for Knowledge Graph Question Answering.
+Zhishang Xiang, Chuanjie Wu, Qinggang Zhang,
+Shengyuan Chen, Zijin Hong, Xiao Huang, and Jin-
+songSu.2025. WhentouseGraphsinRAG:ACom-
+prehensive Analysis for Graph Retrieval-Augmented
+Generation.arXiv.
+12
+26293
+
+========== PDF PAGE 13 / 27 ==========
+Jian Xie, Kai Zhang, Jiangjie Chen, Renze Lou, and
+Yu Su. 2023. Adaptive chameleon or stubborn sloth:
+Revealing the behavior of large language models in
+knowledge conflicts. InThe Twelfth International
+Conference on Learning Representations.
+Derong Xu, Xinhang Li, Ziheng Zhang, Zhenxi Lin,
+Zhihong Zhu, Zhi Zheng, Xian Wu, Xiangyu Zhao,
+Tong Xu, and Enhong Chen. 2025. Harnessing
+Large Language Models for Knowledge Graph Ques-
+tion Answering via Adaptive Multi-Aspect Retrieval-
+Augmentation.
+An Yang, Anfeng Li, Baosong Yang, Beichen Zhang,
+Binyuan Hui, Bo Zheng, Bowen Yu, Chang
+Gao, Chengen Huang, Chenxu Lv, and 1 others.
+2025. Qwen3 technical report.arXiv preprint
+arXiv:2505.09388.
+Wei Yang, Yuqing Xie, Aileen Lin, Xingyu Li, Luchen
+Tan, Kun Xiong, Ming Li, and Jimmy Lin. 2019.
+End-to-end open-domain question answering with
+bertserini. InProceedings of the 2019 Conference of
+the North American Chapter of the Association for
+Computational Linguistics (Demonstrations), pages
+72–77.
+Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Bengio,
+William Cohen, Ruslan Salakhutdinov, and Christo-
+pher D Manning. 2018. Hotpotqa: A dataset for
+diverse, explainable multi-hop question answering.
+InProceedings of the 2018 Conference on Empiri-
+cal Methods in Natural Language Processing, pages
+2369–2380.
+Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak
+Shafran, Karthik Narasimhan, and Yuan Cao. 2023.
+React: Synergizing reasoning and acting in language
+models. InInternational Conference on Learning
+Representations (ICLR).
+Murong Yue. 2025. A survey of large language
+model agents for question answering.arXiv preprint
+arXiv:2503.19213.
+Fangyuan Zhang, Zhengjun Huang, Yingli Zhou, Qin-
+tian Guo, Zhixun Li, Wensheng Luo, Di Jiang, Yix-
+iang Fang, and Xiaofang Zhou. 2025. EraRAG:
+Efficient and Incremental Retrieval Augmented Gen-
+eration for Growing Corpora.
+Jiahao Zhang, Haiyang Zhang, Dongmei Zhang, Yong
+Liu, and Shen Huang. 2024a. End-to-End Beam
+Retrieval for Multi-Hop Question Answering.
+Nan Zhang, Prafulla Kumar Choubey, Alexander Fab-
+bri, Gabriel Bernadett-Shapiro, Rui Zhang, Prasenjit
+Mitra, Caiming Xiong, and Chien-Sheng Wu. 2024b.
+SiReRAG:IndexingSimilarandRelatedInformation
+for Multihop Reasoning.
+Zexuan Zhong, Zhengxuan Wu, Christopher Manning,
+ChristopherPotts,andDanqiChen.2023. MQuAKE:
+Assessing knowledge editing in language models via
+multi-hop questions. InProceedings of the 2023
+Conference on Empirical Methods in Natural Lan-
+guage Processing, pages 15686–15702, Singapore.
+Association for Computational Linguistics.
+Yingli Zhou, Yaodong Su, Youran Sun, Shu Wang,
+Taotao Wang, Runyuan He, Yongwei Zhang, Sicong
+Liang, Xilin Liu, Yuchi Ma, and 1 others. 2025.
+In-depth analysis of graph-based rag in a unified
+framework.arXiv preprint arXiv:2503.04338.
+13
+26294
+
+========== PDF PAGE 14 / 27 ==========
+A Methodology
+As the T2RAG consists of several steps with
+clear control flow, we illustrate it by the following
+pseudo algorithm.
+B Experiments
+B.1 Detailed Implementations
+For all experiments, we set the Large Language
+Model (LLM) temperature to 0 to ensure determin-
+istic and reproducible outputs. Local embedding
+generation was performed on a single NVIDIA
+L40S GPU.
+A key aspect of our benchmark is the standard-
+izationofthefinalanswerformat. Wemodifiedthe
+prompt for all methods to include a specific format
+template, which yielded a significant performance
+boost compared to baseline implementations in
+other studies (Gutiérrez et al., 2025a; Xiang et al.,
+2025). In those works, methods such as RAP-
+TOR and IRCOT consistently performed about
+10%lowerthangraph-basedRAGapproaches. Fur-
+thermore, in our implementation of theRAPTOR,
+we replaced the original Gaussian Mixture Model
+(GMM)forclusteringwithK-Means. Thisdecision
+was based on the superior computational efficiency
+of K-Means, which has been demonstrated to pro-
+duce results of similar quality for this type of
+task(Zhouetal.,2025). Theclustersizeissetto10
+andlevelissetto3followingthebenchmark(Zhou
+etal.,2025). OurimplementationofIRCoTstrictly
+followstheofficialcodeandproceduresreleasedby
+its authors (Zhang et al., 2024b). IRCoT operates
+onaniterativecyclewherethemodelfirstgenerates
+areasoningstep(a“thought”)andthenactsuponit.
+Thecoreofitsmulti-hopreasoningisguidedbythe
+following Chain-of-Thought (CoT) prompt, which
+instructs the model to generate one reasoning step
+at a time:
+You serve as an intelligent assistant,
+adept at facilitating users through
+complex, multi-hop reasoning across
+multiple documents. This task
+is illustrated through demonstrations,
+each consisting of a document set
+paired with a relevant question and its
+multi-hop reasoning thoughts. Your task
+is to generate one thought for current
+step, DON’T generate the whole thoughts
+at once! If you reach what you believe
+to be the final step, start with "So the
+answer is:".
+ForHippoRAG2, we utilized the official pro-
+gramreleasedbytheauthorsandfollowedtheirrec-
+ommended default hyperparameter settings. This
+approach builds a knowledge graph from the text,
+usesPersonalizedPageRank(PPR)forentity-aware
+retrieval, and then filters the retrieved facts before
+the final answer generation. The key hyperparam-
+eters, which govern the graph construction and
+retrieval process, are detailed in Table 2.
+After retrieving candidate facts, HippoRAG2
+employs a filtering step to select the most rele-
+vant information. This is guided by the following
+prompt:
+You are a critical component of a
+high-stakes question-answering system...
+Your task is to filter facts based on
+their relevance to a given query... You
+must select up to 4 relevant facts from
+the provided candidate list that have a
+strong connection to the query... The
+output should be in JSON format, e.g.,
+{"fact": [["s1", "p1", "o1"], ...]}, and
+if no facts are relevant, return an empty
+list, {"fact": []}...
+B.2 A Note on Hyperparameters
+One of the practical advantages of T2RAG is its
+simplicity and robustness, as it is largely free of
+the complex hyperparameter tuning required by
+other methods. For instance, HippoRAG2 requires
+careful setting of graph-related parameters (e.g.,
+Synonym Threshold, Damping Factor), and other
+graph-based methods like Raptor require tuning
+of clustering parameters. The design of T2RAG
+avoidssuchmodel-specifictuning,makingiteasier
+to deploy and more generalizable across different
+domains without extensive optimization.
+B.3 More Performance Results
+B.3.1 Performance across Different LLMs
+To provide a robust evaluation of our proposed
+method,T2RAG, we extend the analysis to all six
+datasets presented in the main content. For each
+model and method combination, we calculate the
+averagedExactMatch(EM)andF1scores,which
+are further averaged across all six datasets to pro-
+duce a single, unified performance score. These
+methods were evaluated across four powerful lan-
+guage models known for their reasoning capabil-
+ities:GPT-4o-mini,Gemini-2.5-flash,Qwen-3-
+Next-Instruct, andGemini-2.5-pro.
+The radar chart in Figure 8 visualizes the aggre-
+gated performance across all six datasets, offering
+compelling evidence to support the central argu-
+ment presented in our paper.
+T2RAG, consistently forms the outermost
+perimeter of the radar chart. This visually demon-
+stratesthatourmethodachievesthehighestaverage
+EM and F1 score across all four tested language
+14
+26295
+
+========== PDF PAGE 15 / 27 ==========
+Algorithm 1T2RAG: Online Iterative Triplet Resolution (Main Process)
+Input:Query 𝑞, Triplet DB IndexI, LLM, Max Iterations𝐾, Target unique chunks𝑘, Triplet-to-
+Chunk-MapM chunk
+Output:Final answer𝑎
+1:⊲Step 1: Structured Query Decomposition
+2:T resolved,Tsearchable,Tfuzzy ←LLM Decompose(𝑞)
+3:⊲Step 2: Multi-Round Triplet Resolving Loop
+4:for𝑙=1→𝐾do
+5:if|T searchable ∪T fuzzy|=0then
+6:break
+7:end if
+8:⊲Step 2.1: Call the Adaptive Retrieval (see Algorithm 2)
+9:P retrieved,Cretrieved ←ADAPTIVERETRIEVE(T searchable,I,𝑘,M chunk)
+10:⊲Step 2.2: LLM-based Triplets Resolution
+11:T (new)
+resolved,T (new)
+searchable ←LLM Resolve(Tsearchable,Tfuzzy,Pretrieved,Cretrieved)
+12:⊲Step 2.3: State Update
+13:T resolved ←T resolved ∪T (new)
+resolved;T searchable ←T (new)
+searchable;T fuzzy ←T fuzzy \(T (new)
+resolved ∪T (new)
+searchable)
+14:end for
+15:⊲Step 3: Final Answering
+16:if|T searchable ∪T fuzzy|=0then
+17:T context ←T resolved
+18:else
+19:T context ←T resolved ∪T searchable
+20:end if
+21:𝑎←LLM Answer(𝑞,T context)
+22:return𝑎
+Table 2: Hyperparameters for the HippoRAG2 baseline.
+Hyperparameter Value Description
+Synonym Threshold 0.8 The cosine similarity threshold for merging entity synonyms.
+Damping Factor (PPR) 0.5 The damping factor for the Personalized PageRank algorithm.
+Temperature 0.0 The generation temperature (0.0 ensures deterministic output).
+Table 3: Dataset Statistics
+Dataset PopQA 2Wiki Musique HotpotQA Story Medical
+# questions1000 1000 1000 1000 794 564
+# chunks33,595 6119 11,656 9811 1266 268
+# tokens2,768,270 454,715 964,203 914,956 915,484 189,271
+# extracted triplets398,924 65,028 127,640 124,722 22,812 5256
+models, from the more compact GPT-4o-mini to
+the highly capable Gemini-2.5-pro. The perfor-
+mance gap between T2RAG and other methods is
+substantialanduniform,highlightingitsrobustness
+and state-of-the-art performance. Our main argu-
+mentpositsthatT 2RAG’sstrengthliesinitsability
+15
+26296
+
+========== PDF PAGE 16 / 27 ==========
+Algorithm 2Adaptive Triplet Retrieval
+Require:Searchable tripletsT searchable, IndexI, Target chunks𝑘, MapMchunk
+Ensure:Retrieved propositionsP retrieved, Retrieved chunksCretrieved
+1:functionAdaptiveRetrieve(T searchable,I,𝑘,M chunk)
+2:𝑃 candidates ←∅
+3:for𝑡∈T searchable do
+4:query_prop←Concatenate(𝑡)
+5:query_vec←𝐸(query_prop)
+6:𝑃 candidates ←𝑃candidates ∪Search(I,query_vec,𝑁)
+7:end for
+8:Sort𝑃 candidates globally by similarity score
+9:P retrieved ←∅; unique_chunk_ids←∅
+10:for𝑝∈sorted𝑃 candidates do
+11:if|unique_chunk_ids|≥𝑘 chunks then
+12:break
+13:end if
+14:P retrieved ←P retrieved ∪{𝑝}
+15:chunk_id←M chunk[𝑝]
+16:unique_chunk_ids←unique_chunk_ids∪{chunk_id}
+17:end for
+18:C retrieved ←GetChunksFromIDs(unique_chunk_ids)
+19:returnP retrieved,Cretrieved
+20:end function
+to effectively harness the advanced reasoning ca-
+pabilities of modern LLMs. The chart strongly
+validates this claim when we compare T2RAG
+with other methods. For instance,IRCoT(purple
+line), another method that encourages reasoning, is
+the second-best performer, closely trailing T2RAG.
+This suggests that methods explicitly designed to
+guidetheLLM’sreasoningprocessareparticularly
+effective with these models. The hypothesis is
+further solidified by observing the performance of
+HippoRAG2(pink line). As argued in the main
+content, methods that relegate the LLM to sim-
+pler tasks like filtering may fail to unlock its full
+potential. The chart shows that HippoRAG2’s per-
+formance is significantly lower than T2RAG and
+IRCoT, and is often comparable to or only slightly
+better than the standard RAG baseline. This under-
+performance across a suite of powerful reasoning
+models supports our hypothesis that its architec-
+ture creates a bottleneck, preventing the effective
+utilization of the LLM’s core reasoning strengths.
+In summary, the aggregated results visualized in
+the radar chart provide unequivocal support for our
+central claim. The consistent, chart-topping perfor-
+manceofT 2RAGacrossmultiplepowerfulmodels
+and diverse datasets confirms that its step-by-step
+guidance mechanism is uniquely suited to leverag-
+ing the sophisticated reasoning abilities inherent in
+the next generation of large language models.
+Gemini-2.5-flash
+GPT-4o-mini
+Gemini-2.5-pro
+Qwen-3-Next-Instruct
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+NOR
+BM25
+Standard
+HippoRAG2
+IRCoT
+T2RAG
+Figure 8: Performance comparison across different
+LLMs. Reasoning models are inbold.
+B.3.2 Performance across Hop Complexities
+Toanalyzeperformanceonlongerreasoningchains,
+weevaluatedT 2RAGagainststrongbaselines(Hip-
+poRAG2 and IRCoT) on the MuSiQue dataset,
+stratified by hop count (2, 3, and 4 hops).
+Analysis.As shown in Table 4, T2RAG consis-
+tently achieves State-of-the-Art performance on
+2-hop and 3-hop queries. While graph traversal
+methods like HippoRAG2 exhibit an advantage at
+extreme hop counts (4-hop) due to global graph
+connectivity, T2RAG maintains competitive per-
+16
+26297
+
+========== PDF PAGE 17 / 27 ==========
+Table 4: Performance comparison on the MuSiQue
+dataset across different hop counts. Best results are
+bolded.
+Method 2-hop 3-hop 4-hop
+F1 EM F1 EM F1 EM
+HippoRAG2 58.79 43.82 41.90 27.2231.14 22.29IRCoT 43.12 33.20 31.81 22.78 13.22 7.83T2RAG (Ours)60.81 48.46 42.50 31.3324.46 14.46
+formance over standard iterative approaches like
+IRCoT across all complexity levels. Consequently,
+T2RAG is particularly recommended for questions
+requiring reasoning depths of up to 3 hops.
+B.3.3 Indexing Stage Analysis
+The indexing stage is a one-time, offline process,
+but its cost can be substantial and even prohibitive
+forverylargecorpora. AsseeninFigure9andFig-
+ure 10, datasets like PopQA, 2Wiki, and MuSiQue
+demand a considerable amount of time and token
+resources for indexing across all methods. The
+consumption patterns reveal thatindexing costs
+are not simply proportional to the raw size of
+the document corpus.For instance, the token
+consumption for RAPTOR’s summarization and
+the triplet extraction for T2RAG and HippoRAG2
+donotscalelinearlywiththenumberofdocuments.
+This variability likely stems from theinformative-
+ness and density of the source documents.A
+document rich with distinct facts will lead to more
+triplets or more detailed summaries, increasing the
+computational load, whereas a sparse document
+will be processed more quickly. This makes the ex-
+act indexing cost unpredictable without analyzing
+the content itself.
+B.3.4 Retrieval Stage Analysis
+The retrieval stage is an online process that occurs
+for every query, making its efficiency critical for
+user-facing applications. Our analysis shows that
+T2RAG is as efficient as HippoRAG2 during the
+retrieval stage.Both methods exhibit similar time
+and token consumption profiles across all datasets.
+This is expected, as their retrieval mechanisms
+are conceptually similar, operating over the graph
+structures built during indexing.
+Moreimportantly,T 2RAGdemonstratesasub-
+stantial efficiency gain over multi-round RAG
+methodslikeIRCoT.AsseeninFigure10,T 2RAG
+consistentlyconsumesfewertokensduringretrieval
+than IRCoT across all tested datasets. In some
+cases, such as the Medical and Story datasets, the
+reduction in token consumption is over 45%. This
+efficiency stems from T2RAG’s ability to synthe-
+size a direct answer from the retrieved triplets in
+a single round, avoiding the compounding token
+costsassociatedwiththeiterativequeryrefinement
+process in multi-round architectures.
+Remarkably,T2RAG often achieves lower, or
+at least comparable, token consumption than
+even single-round methods like RAPTOR.This
+isparticularlyevidentindatasetslikePopQA,Med-
+ical, and Story. We attribute this advantage to the
+nature of the final answer generation. T2RAG gen-
+eratesaconciseanswerdirectlyfromthestructured
+triplets, which minimizes the number of output
+tokens. Since output tokens are heavily weighted
+in our consumption metric (multiplied by 4), this
+concise, triplet-formulated output provides a sig-
+nificant efficiency advantage, leading to an overall
+reduction in computational cost.
+B.4 More Efficiency Results
+This section provides a detailed analysis of the
+time and token consumption of various Retrieval-
+Augmented Generation (RAG) methods, as illus-
+trated in Figure 9 and Figure 10. The primary
+goal is to evaluate the computational efficiency of
+our proposed method, T2RAG, against other estab-
+lished baselines across different stages of the RAG
+pipeline. The y-axis represents the wall-clock time
+in seconds required for the indexing and retrieval
+stages. The retrieval stage time has been scaled by
+a factor of 1000 to ensure visibility on the chart
+alongside the much larger indexing times. The
+y-axis represents the total number of LLM tokens
+consumed. This is a weighted sum calculated us-
+ing the formula:Token Consumption = (#input
+tokens) + 4×(#output tokens). This weighting
+reflects the common pricing models of LLM APIs,
+where generation (output) is typically priced sig-
+nificantly higher (by a factor of 4) than processing
+(input). As with the time consumption chart, the
+retrieval stage consumption is scaled by 1000. The
+x-axis in both figures shows the performance of
+four methods (T2RAG, HippoRAG2, RAPTOR,
+and IRCoT) across six distinct datasets.
+B.5 More Ablation Study
+To validate the necessity of triplet embeddings, we
+conducted an ablation study comparing our pro-
+posed method against a variant we term"Chunk-
+basedSlot-Filling."Thisbaselineutilizesthesame
+iterative slot-filling logic as T2RAG but performs
+retrieval based on raw chunk embeddings rather
+than triplet embeddings.
+Results.As illustrated in Table 5, removing
+triplet-based retrieval results in a drastic perfor-
+17
+26298
+
+========== PDF PAGE 18 / 27 ==========
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+0
+2
+4
+×104 PopQA
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+0.0
+0.5
+1.0
+×104 2Wiki
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+0.0
+0.5
+1.0
+×104 MuSiQue
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+0.0
+0.5
+1.0
+×104 HotpotQA
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+0.0
+2.5
+5.0
+7.5
+×103 Medical
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+0.0
+2.5
+5.0
+7.5
+×103 Story
+Time (s)
+Indexing Stage Retrieval Stage (x1000)
+Figure 9: Time consumption at indexing and retrieval stages across all datasets.
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+0.0
+0.5
+1.0
+×108 PopQA
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+0.0
+0.5
+1.0
+1.5
+×107 2Wiki
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+0
+1
+2
+×107 MuSiQue
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+0
+1
+2
+3
+×107 HotpotQA
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+0
+1
+2
+3
+×107 Medical
+T2 RAG
+HippoRAG2
+RAPTOR
+IRCoT
+0
+1
+2
+3
+×107 Story
+Token Consumption (#input + 4 * #output)
+Indexing Stage Retrieval Stage (x1000)
+Figure 10: Token consumption at indexing and retrieval stages across all datasets.
+18
+26299
+
+========== PDF PAGE 19 / 27 ==========
+Table 5: Ablation study comparing the proposed T2RAG (Triplet-based) against a Chunk-based baseline. The
+"Calls" metric indicates the total number of retrieval/LLM interactions. Best results are bolded.
+Method 2Wiki HotpotQA MuSiQue
+EM F1 Calls EM F1 Calls EM F1 Calls
+Chunk-based Baseline 0.188 0.230 2000 0.301 0.397 1994 0.104 0.182 1993
+T2RAG (Ours) 0.587 0.661 3355 0.565 0.700 3257 0.352 0.472 3522
+mance decline, with F1 scores dropping by approx-
+imately 40–60% across all datasets.
+Analysis.We attribute this performance gap to
+the granularity mismatch inherent in chunk-based
+retrieval. Without the precise semantic alignment
+("hook") provided by triplets, the embedding of a
+specificdecomposedqueryslotoftenfailstomatch
+the coarser embedding of a large text chunk.
+Furthermore, the significantly lower number of
+"Calls" in the baseline indicatespremature ter-
+mination. In the absence of triplets, the system
+frequently fails to retrieve relevant information to
+fill the current reasoning slot. Consequently, the
+iterative loop breaks early, preventing the model
+from traversing the full reasoning chain required
+for complex multi-hop questions.
+B.6 More Iteration Results
+This analysis examines the average number of re-
+trieval iterations required by T2RAG and IRCoT to
+answer a query on the 2Wiki dataset, varying the
+number of retrieved chunks (top-𝑘) per iteration.
+Table 6: Average Number of Retrieval Iterations vs.
+top-𝑘on the 2Wiki Dataset.
+topk T 2RAG IRCoT
+2 1.54 1.85
+3 1.56 1.83
+4 1.73 1.70
+5 1.70 1.46
+6 1.56 1.40
+A key observation from the data is thatT2RAG
+consistently saves on the number of retrieval
+iterations compared to IRCoT, particularly when
+retrievingfewerdocumentsperstep( 𝑘=2or3). For
+instance, with𝑘 = 2, T2RAG requires an average
+of only 1.54 iterations, whereas IRCoT needs 1.85
+iterations—areductionofapproximately17%. This
+suggests that T2RAG’s method of decomposing a
+query into structured triplets allows for a more
+direct and efficient path to resolving the query,
+requiring fewer rounds of retrieval to gather the
+necessary context.
+Theresultschallengethesimpleassumptionthat
+retrieving fewer chunks per iteration (a smaller𝑘)
+would necessarily lead to a higher number of total
+iterations. For T2RAG, the number of iterations
+remains relatively stable and low, fluctuating be-
+tween 1.54 and 1.73 without a clear trend. For
+IRCoT, the relationship is even more complex; as
+𝑘 increases from 4 to 6, the number of iterations
+surprisinglydecreasessignificantly. This indicates
+that the effectiveness of the retrieved chunks is
+more important than the sheer quantity. T2RAG’s
+focusedretrieval,guidedbyplaceholdersintriplets,
+appears to acquire high-quality context more reli-
+ably, making it less dependent on the𝑘value and
+more efficient overall.
+B.7 Comparison with More Multi-round
+Methods
+To evaluate our method against iterative reasoning
+frameworks,weimplementedtwoagenticbaselines:
+ReAct(Yao et al., 2023) andSelf-Ask(Press et al.,
+2023).
+• Settings:Weset 𝑘=5 fordocumentretrieval
+and limit the process to a maximum of 3
+iterations.
+• Metrics:We report Exact Match (EM), F1
+score, and Total Token usage (calculated as
+input tokens +4×output tokens).
+Analysis.As demonstrated in Table 7, T2RAG
+significantly outperforms both ReAct and Self-
+Ask across datasets. This advantage is partic-
+ularly notable in terms of efficiency (token us-
+age). While ReAct demonstrates competitive per-
+formance on MuSiQue when using GPT-4o-mini,
+T2RAG achieves comparable results with fewer
+tokens, highlighting its efficiency in handling com-
+plex multi-hop scenarios without the high compu-
+tational overhead of sequential multi-round agents.
+19
+26300
+
+========== PDF PAGE 20 / 27 ==========
+Table 7: Performance and efficiency comparison against multi-round baselines (ReAct and Self-Ask) using
+Gemini-2.5 Flash and GPT-4o-mini. T2RAG achieves superior or competitive accuracy while significantly reducing
+token consumption.
+Model Method 2Wiki HotpotQA MuSiQue
+EM F1 Tokens EM F1 Tokens EM F1 Tokens
+Gemini
+2.5 Flash
+ReAct 0.293 0.337 395,075 0.432 0.528 611,825 0.186 0.256 431,322
+Self-Ask 0.083 0.148 469,714 0.310 0.391 532,756 0.147 0.229 2,195
+T2RAG 0.693 0.775 366,199 0.623 0.732 606,914 0.391 0.491336,555
+GPT
+4o-mini
+ReAct 0.534 0.598 448,156 0.586 0.729 697,667 0.325 0.458 369,656
+Self-Ask 0.274 0.332 504,981 0.454 0.596 324,774 0.293 0.397 459,596
+T2RAG 0.667 0.744468,089 0.542 0.673 469,8420.3430.456338,129
+B.8 Triplet Quality Analysis
+B.8.1 Overall Performance
+We conducted a detailed manual analysis on a set
+of 50 randomly sampled documents from 2Wiki
+dataset to quantify the performance of the OpenIE
+triplet extraction process. The results are summa-
+rized in Table 8.
+The high Precision (95.9%) and Recall (98.2%)
+scores demonstrate the overall reliability of the
+extraction process. This detailed error analysis
+confirms the robustness of the IE module while
+also highlighting key areas for future improvement,
+particularly in reducing the incidence ofmissing
+andovermergedtriplets.
+B.8.2 Error Statistics and Examples
+Out of the 50 documents, 16 (32.0%) were con-
+firmed to haveperfect extractionswith no errors.
+The remaining 33 documents (66.0%) contained at
+least one error. A detailed breakdown of the error
+types is presented in Table 9.
+Toprovideaclearerunderstandingoftheseerror
+categories, we include the following examples:
+B.9 Error Analysis
+We conducted a comprehensive error analysis on
+775 incorrect answer among 1000 samples of
+MuSiQue dataset to categorize the primary points
+of weakness in our method. The analysis is done
+by Gemini-2.5-pro. The results, summarized in
+Table 12, reveal that the most significant challenge
+lies in the resolution phase.“Retrieved correct
+but wrong resolution”is the most prevalent error
+type, accounting for a substantial46.0%of all
+cases. This indicates that even when the system
+successfully finds the relevant knowledge, it fre-
+quently struggles to synthesize it correctly to form
+the final answer.
+The second major bottleneck is“Missing re-
+trieval,”which constitutes31.2%of the errors,
+highlighting instances where the necessary facts
+were never found in the first place. Combined,
+these two categories represent over 77% of all
+failures, underscoring that the retrieval and subse-
+quent resolution stages are the most critical areas
+for improvement. Less frequent, but still notable,
+issues include“Hallucination” (12.7%)and gen-
+erating an incorrect final answer despite having all
+correct intermediate steps(10.0%). This analysis
+strongly suggests that future work should prioritize
+enhancing the model’s ability to not only retrieve
+the correct atomic pieces of information but also
+to reason over them accurately.
+In addition to solely analyzing one experiment,
+this toolkit can also facilitate more analysis such as
+find out why a certain LLM performs much poorer
+than another.
+C Related Work
+We group prior efforts intosingle-round,multi-
+round,graph-enhancedRAG andsummarization-
+basedRAG, each adding more interaction or struc-
+tured reasoning and paving the way for the fine-
+grained design of T2RAG.
+Single-round RAG.Classical sparse retrievers
+such as TF-IDF and BM25 paired with extrac-
+tive readers perform strongly for open-domain QA
+(Yang et al., 2019; Nie et al., 2019; Wang et al.,
+2023a). Dense retrievers such as DPR (Karpukhin
+et al., 2020) later replaced sparse vectors with
+learned embeddings, retrieving a fixed top-𝑘set in
+one pass.However, answering multi-hop questions
+often demands the intermediate results to further
+retrieval, motivating the multi-round techniques
+that follow.
+Multi-round RAG.Due to the missing bridges
+problem we mentioned in Section 1 more and
+more works follow a multi-round, training-free
+20
+26301
+
+========== PDF PAGE 21 / 27 ==========
+Table 8: Overall performance metrics for the triplet extraction stage.
+Confirmed Docs Precision Recall F1 Score Avg Triplets/Doc Avg Entities/Doc
+50 95.9% 98.2% 95.0% 11.6 10.5
+Table 9: Breakdown of error types across 50 manually
+annotated documents.
+Error Type Documents Affected Percentage
+Missing 26 52.0%
+Over-merge 20 40.0%
+Inaccurate 5 10.0%
+Over-split 5 10.0%
+Placeholder 2 4.0%
+Hallucination 1 2.0%
+paradigm, which enables the LLMs infer the inter-
+mediate information thus better retrieve the final
+answer. Some works focus on the query side.
+Khot et al. (2023) decompose multi-hop questions
+into single-hop sub-queries that are solved sequen-
+tially. Yaoetal.(2023)proposeReAct,interleaving
+chain-of-thought (CoT) (Wei et al., 2022) steps
+with search actions issued by the LLM. Similariy,
+Query2Doc(Wangetal.,2023b)expandingqueries
+into concise triplets to cut token usage while pre-
+serving recall. Another line of works relies on
+the generated intermediate results for next itera-
+tion. Beam Retrieval (Zhang et al., 2024a) jointly
+training an encoder and classifiers to keep mul-
+tiple passage hypotheses across hops. FLARE
+(Jiang et al., 2023) forecasts upcoming sentences
+to decide when fresh retrieval is needed during
+long-form generation. IRCoT (Trivedi et al., 2023)
+andITER-RETGEN(Shaoetal.,2023),alternately
+expanding a CoT and fetching new evidence to an-
+swermulti-stepquestions. AdaptiveQA(Xieetal.,
+2023) create an adaptive framework that picks the
+simplest effective retrieval strategy according to
+query complexity.Despite these advances, few
+efforts explicitly aim to reduce token costs or num-
+ber of llm calls during multi-round RAG. Previous
+methods expand query or generates CoT with long
+sentences in each round. In contrast, our work
+minimizestokenconsumptionbyformulatingquery
+expansions as triplets and simplifying reasoning
+steps as triplets resolving.
+Graph RAG.One major line of research ad-
+dresses complex QA by structuring knowledge
+into graphs. Originating in Knowledge Graph QA
+(KGQA), early methods focused on decomposing
+queriesorperformingmulti-round,LLM-evaluated
+traversals from seed nodes (Luo et al., 2024; Sun
+et al., 2024; Cheng et al., 2024; Mavromatis and
+Karypis, 2022). The application of this paradigm
+to general ODQA was popularized by systems
+that construct a knowledge graph entirely with
+LLMs and use community detection for retrieval
+(Edge et al., 2024). Subsequent work has aimed
+to make this process more efficient. For instance,
+LightRAG (Guo et al., 2024) introduces a dual-
+level retrieval system combining graph structures
+withvectorsearchtoimproveknowledgediscovery.
+Targeting resource-constrained scenarios, Mini-
+RAG (Fan et al., 2025) builds a heterogeneous
+graph of text chunks and named entities, enabling
+lightweight retrieval suitable for Small Language
+Models. To tackle the common challenge of en-
+tity merging, HippoRAG (Gutiérrez et al., 2025a)
+and HippoRAG2 (Gutiérrez et al., 2025b) create
+synonym links between similary entity nodes and
+employs a PageRank (Haveliwala, 1999) algorithm
+for final node selection.Despite these advances, a
+centralchallengeforGraphRAGremainsthecostly
+and error-prone nature of graph construction from
+unstructured text.
+Summarization-basedRAG.Adistinctbutrelated
+approach focuses on building hierarchical summa-
+rization trees rather than explicit graphs. These
+methods aim to capture information at varying lev-
+els of abstraction. For example, Raptor (Sarthi
+et al., 2024) constructs a summary tree by recur-
+sively clustering document chunks and summa-
+rizing the content within each cluster to create
+new, more abstract retrieval units (Wu et al., 2023).
+Aiming to capture more detailed contextual infor-
+mation, SireRAG (Zhang et al., 2024b) creates
+a "relatedness tree" by summarizing fine-grained
+propositions that share the same entities.How-
+ever, these summarization-based methods often
+incur high computational costs during the index-
+ing phase and risk losing the fine-grained, factual
+details that are essential for precise factoid QA.
+D Limitations
+D.1 Overview
+Although our method achieves state-of-the-art per-
+formance with a simple design, it is not without
+limitations.Experimentally, we limited our multi-
+21
+26302
+
+========== PDF PAGE 22 / 27 ==========
+Table 10: Examples and Descriptions of Triplet Extraction Error Types
+Error Type Description Example
+Inaccurate An element of the triplet
+is extracted with minor er-
+rors.
+Source:“...Pierre De Geyter, is known for, writing
+the music of ’The Internationale’.”
+Incorrect Extraction: (Pierre De Geyter, is
+known for, the music of The Internationale)
+Over-split A single cohesive fact is
+incorrectly split into mul-
+tiple triplets.
+Incorrect Extractions: (Denis Sanders, won
+for, A Time Out of War) + (Denis Sanders,
+won, Best Short Subject)
+Correct Triplet: (Denis Sanders, won Best
+Short Subject for, A Time Out of War)
+Hallucination A triplet is generated that
+is not supported by the
+source text.
+Source:“...He is the husband of actress Cate
+Blanchett.”
+Incorrect Extraction:(Cate Blanchett, is an
+actress from, Australian)
+Missing A key fact present in the
+text is not extracted.
+Source:“William I, Elector of Hesse... was the
+eldest surviving son of Frederick II...”
+MissedTriplet: (William I, son of, Frederick
+II)
+Over-merge Two or more distinct facts
+are incorrectly combined
+into a single triplet.
+Intended Facts: (James Tuchet, succeeded,
+James Tuchet) and (James Tuchet, is, 6th
+Earl of Castlehaven)were incorrectly merged.
+Placeholder A generic and uninforma-
+tive triplet is extracted.
+Source:“The Trail of the Lonesome Pine may refer
+to...”
+IncorrectExtraction: (The Trail..., may refer
+to, various interpretations)
+22
+26303
+
+========== PDF PAGE 23 / 27 ==========
+Table 11: Distribution of error types across 775 identi-
+fied failures. The analysis highlights that retrieval and
+resolution are the primary challenges.
+Error Type Count Percentage
+Retrieved correct but wrong resolution 354 46.0%
+Missing retrieval 240 31.2%
+Hallucination 98 12.7%
+All correct but wrong final answer 77 10.0%
+Unknown / Unclassified 6 0.8%
+Total 775 100.0%
+round methods to 3 iterations to match the com-
+plexity of the datasets and ensure a fair efficiency
+comparison; we also did not have the resources to
+test on other embedding models especially LLM-
+based ones, re-rankers or large external knowledge
+graphs (e.g., Wikipedia KG (Hertling and Paul-
+heim, 2018)). Our evaluation is also limited to
+the black-box and end-to-end one which may lack
+explanability without the recall score of chunks.
+Methodologically, our approach is highly depen-
+dent on the quality of the triplet extraction. While
+higher-quality sources can be used, simple triplets
+may not adequately represent complex knowledge
+like many-to-many relationships, a challenge that
+couldbeaddressedwithhypergraphmodeling(Luo
+et al., 2025) in future work. Besides, the efficiency
+of triplet extraction can be further improved be-
+yond the classic OpenIE pipeline. Developing
+these methods needs efforts from information ex-
+traction (Grishman, 2015) area.Finally, regarding
+scalability, building the index from a very large
+corpus is token-intensive. However, our method
+is very efficient when using a pre-existing triplet
+database. This design also makes it inherently suit-
+able for evolving knowledge bases, as new triplets
+are independent to previous ones thus they can be
+added incrementally, offering a significant advan-
+tage over static Graph RAG approaches (Zhang
+et al., 2025).
+D.2 Experimental Fairness
+Retrieval Volume Balance.A potential concern
+in comparing multi-round methods against direct
+chunk-retrieval baselines is the "information im-
+balance," where iterative methods may access a
+larger volume of text. To address this, our analy-
+sis in Figure 7 utilizesEffective Top-K(defined
+as 𝑘×average number of iterations) for the X-axis
+when plotting multi-round methods. This normal-
+ization ensures we compare methods based on the
+total volume of information retrieved. The re-
+sultsdemonstratethatT 2RAGmaintainsconsistent
+performance advantages across different Effective
+Top-K values, confirming that its superiority stems
+from enhanced reasoning and retrieval precision
+rather than simply accessing more context. For
+the main results table, we adhere to the evaluation
+protocols established in HippoRAG2 (Gutiérrez
+et al., 2025b), where variation in retrieved content
+volume is treated as an inherent characteristic of
+the respective methodologies.
+D.3 Edge Case Handling
+We explicitly define the system’s behavior in the
+rareinstancewherenosearchabletripletsareidenti-
+fiedduringaniteration. Ifthequerydecomposition
+orrefinementstepfailstogeneratevalidtriplets,the
+iterativeretrievalloopterminatesimmediately. The
+system then proceeds directly to the final answer
+generation phase utilizing the context retrieved up
+to that point. Empirically, valid natural language
+queries typically contain sufficient semantic struc-
+ture to form at least one searchable triplet, making
+this edge case extremely uncommon. A "retry
+mechanism" where the LLM could re-attempt de-
+composition or resolution upon failure could be
+helpful. While this could improve robustness, it
+introduces a trade-off between performance and
+efficiency.
+E Case Study
+E.1 One Case from Our Method
+WeofferafulllogofT 2RAGduringourexperiment
+running in Figure 11.
+This case study showcases the effectiveness of
+resolving the complex comparative query in 2 re-
+trieval iterations. The system successfully decom-
+posedthequeryinto4necessarytriplets(twodirec-
+tors, two birth years) and retrieved context only by
+the searchable ones. By identifying both directors
+(Michael Curtiz, Edith Carlmar) and their birth
+years(1886, 1911)fromthetripletDBorinitialset
+of chunks, it bypassed the need for further retrieval
+rounds. This immediate and complete information
+acquisition demonstrates the power of T2RAG’s
+querydecompositionandhigh-qualitytriplet-based
+retrieval.
+E.2 Comparison with Baselines
+We analyzed specific instances where T2RAG suc-
+ceeds while strong query planning baselines fail.
+Arepresentativeexampleisthemulti-hopquestion:
+"Who is the child of the performer of the song Me
+And Bobby McGee?"
+23
+26304
+
+========== PDF PAGE 24 / 27 ==========
+Question: Which film has the director born earlier, God’s Gift To Women or Aldri Annet Enn Brak?
+Q: Think step by step about what information is needed to answer this question. Form triples in the format: subject | predicate | object. Use "?" as placeholder for unknown entities…
+A: 
+Searchable Triplets: God’s Gift To Women, is directed by, ?DirectorA ; Aldri Annet Enn Brak, is directed by, ?DirectorB ; 
+Fuzzy Triplets: ?DirectorA, was born in, ?birthYearA ; ?DirectorB, was born in, ?birthYearB
+Q: Use the context passages and propositions to solve any '?' placeholders with as much detail as possible, grounding your answers in the passage content. 
+Retrieved Triplets: Aldri annet enn brak was directed by Edith Carlmar, God's Gift to Women directed by Michael Curtiz, God's Gift to Women was completed as musical film, 
+Aldri annet enn brak is 1954 Norwegian comedy-drama film, God's Gift to Women starring Joan Blondell, Aldri annet enn brak has English title Nothing but trouble, God's Gift to 
+Women is 1931 American pre-Code romantic musical comedy film …(18 propositions in total)
+Retrieved Chunks: Title: Altid ballade …  Title: God's Gift to Women … Title: Aldri annet enn brak ... Title: Edith Carlmar (Edith Mary Johanne Mathiesen) (15 November 1911 -
+17 May 2003)  Title: Stanley Kwan
+A: 
+Newly Resolved triplets: God’s Gift To Women, is directed by, Michael Curtiz ; Aldri Annet Enn Brak, is directed by, Edith Carlmar ; Edith Carlmar, was born in, 1911
+Newly searchable chunks: Michael Curtiz, was born in, ?birthYearA ;
+Query Decomposition
+Iteration 1
+Q: Use the context passages and propositions to solve any '?' placeholders with as much detail as possible, grounding your answers in the passage content. 
+Retrieved Triplets: Michael Curtiz born as Mih1ly Kertsz, Michael Curtiz was Hungarian-born American film director, Michael Curtiz was born on December 24, 1886, Michael 
+Curtiz made stars of Bette Davis, The Vagabond King directed by Michael Curtiz, Bright Leaf directed by Michael Curtiz…(32 propositions in total)
+Retrieved chunks: Title: Michael Curtiz Michael Curtiz\nMichael Curtiz (born Man Kaminer(1886-1905) Mih1ly Kertz (1905); December 24, 1886 April 11, 1962) was a 
+Hungarian-born American film director… Title: Bright Leaf… Title:  Altid ballade…Title: The Vagabond King… Title: JdJds…
+A: 
+Newly Resolved Triplets: Michael Curtiz, was born in, 1886
+Newly Searchable Triplets: None.（all triplets resolved and the iteration is terminated)
+Iteration 2
+Q: Based on the following triplets, please answer the following question. 
+Total Resolved Triplets: God’s Gift To Women, is directed by, Michael Curtiz ; Aldri Annet Enn Brak, is directed by, Edith Carlmar ; Michael Curtiz, was born in, 1886 ; Edith 
+Carlmar, was born in, 15 November 1911.
+A: God’s Gift To Women
+Final Answering 
+Figure 11: An example of T2RAG QA. To answer the question, we need intermediate facts about Michael Curtiz
+(marked by yellow and Edith Carlmar (marked by red), which are not reflected in the question.
+Table 12: Case study comparing error modes between
+baselines and T2RAG. T2RAG succeeds due to its
+variable-locking mechanism.
+Method Answer Verdict Error Mode / Mechanism
+HippoRAG "Not specified" FailureGraph Disconnection:The traversalfailed to immediately identify a link be-tween the song node and a child node,leading the planner to incorrectly con-clude the data did not exist.
+IRCoT "Info not available" FailurePremature Abandonment:While theChain-of-Thought correctly identifiedthe performer, the agent abandoned thesecondary retrieval step for the childafter a single failed retrieval attempt.
+T2RAG "Dean Miller" SuccessStructured Variable Locking:Thepersistence of the unbound placeholder?childforced the system to continueiterating until the specific relationshipwas resolved.
+MechanismAnalysis: StructuredVariableLock-
+ing.T 2RAG’s success in this scenario is at-
+tributed to a mechanism we termStructured Vari-
+able Locking.
+1. Decomposition:The system decomposed the
+query into rigid logical constraints:
+(Me And Bobby McGee,performer,
+?performer)
+(?performer,child,?child)
+2. Step 1 Resolution:The system successfully
+resolved?performerto "Roger Miller."
+3. Forced Iteration:Unlike IRCoT, which halts
+upon a transient retrieval failure, T2RAG ad-
+herestothelogicalconstraint:"Ihaveresolved
+Roger Miller, but the slot for?child remains
+empty."This "empty slot" forces the system
+into subsequent iterations of targeted retrieval
+specifically for "Roger Miller’s family/chil-
+dren," eventually locating the fact that Dean
+Miller is his son.
+F Prompts
+We provide all prompt templates we
+used at retrieval stage, namely structured
+query decomposition, triplet resolving and fi-
+nal answering. These are prompts used
+in LLMDecompose,LLMResolve,LLMAnswer, respec-
+tively. {·}represents the content needed to be
+replacedbytheoriginalquestion,intermediategen-
+eratedtriplets,orretrievedpropositionsandchunks.
+G Discussion
+G.1 Triplet Coverage and Information
+Preservation
+A natural concern regarding triplet-based reason-
+ing is the limited expressiveness and potential in-
+formation loss during extraction. However, our
+data-driven analysis across 3,000 queries demon-
+strates that 99% of questions are either fully or
+24
+26305
+
+========== PDF PAGE 25 / 27 ==========
+Structured Query Decomposition
+You are tasked with reasoning about a question and extracting the necessary knowledge triples to
+answer it.
+Instructions:
+1. Think step by step about what information is needed to answer this question
+2. Form triples in the format: subject | predicate | object
+3. Use "?" as placeholder for unknown entities
+4. For comparative questions involving multiple entities, use distinct placeholders like ?entityA,
+?directorA, ?directorB
+5. Extract multiple triples if the question requires complex reasoning
+Examples:
+- Question: "What is the capital of France?" Reasoning: To answer this, I need to know what
+France’s capital is. Triple: France | has capital | ?
+- Question: "Who directed the movie that won Best Picture in 2020?" Reasoning: To answer this, I
+need to know which movie won Best Picture in 2020, and who directed that movie. Triples: ? |
+won Best Picture | 2020 ? | is directed by | ?
+- Question: "Which film whose director was born first, MovieA or MovieB?" Reasoning: To
+answer this, I need to know the director of each movie, and the birth year of each director to
+compare them. Triples: MovieA | is directed by | ?directorA MovieB | is directed by | ?directorB
+?directorA | was born in | ? ?directorB | was born in | ?
+Now analyze this question:
+Question: {query}
+Provide your response in this format:
+Reasoning: [Your step-by-step reasoning about what information is needed]
+Triples: [List each triple on a new line in format: subject | predicate | object]
+partially covered by the extracted triplets (achiev-
+ingapproximately72%fullcoverageforHotpotQA
+and 2WikiMultiHopQA, and 23% for the highly
+complex MuSiQue dataset). To address any miss-
+ing information stemming from OpenIE extraction
+errors, T2RAG relies on a structural safeguard: the
+systemfallsbackontheoriginaltextchunksthatare
+explicitlypre-mappedtotheretrievedtriplets. This
+ensures the reasoning agent can access granular
+details when the condensed triplet representation
+is insufficient.
+G.2 Efficiency Trade-offs and Resolution
+Bottlenecks
+When evaluating system efficiency, it is crucial to
+balance offline preparation with online inference.
+Standard RAG boasts highly efficient offline in-
+dexing but frequently fails to capture the complex
+relations required for multi-hop reasoning. Con-
+versely, while methods like IRCoT can navigate
+complexrelations,theyincurseveretokenandtime
+costs during online inference. T2RAG balances
+these trade-offs by shifting relational structuring to
+theofflinephase,resultinginasubstantialindexing
+costbutsignificantlyfasterandcheaperonlineinfer-
+ence. Furthermore, our error analysis reveals that
+46% of failures occur when the context is correctly
+retrieved but the LLM fails during the resolution
+step. While this resolution bottleneck highlights
+an area for future refinement, it also demonstrates
+thestrongbaselinepotentialofourretrievalmecha-
+nism, indicating that future advancements in LLM
+instruction-following will directly yield end-to-end
+performance gains.
+G.3 Performance on Large Corpus
+Embedding Quality and Noise.One potential
+concern regarding triplet embeddings is the in-
+troduction of noise compared to graph structures.
+However, we posit that triplets actuallyreduce
+noise compared to chunk-level embeddings.
+• Granularity:A chunk embedding aver-
+ages multiple facts into a single vector, of-
+ten diluting specific details. In contrast,
+triplet embeddings isolate specific relation-
+ships (Subject-Predicate-Object), result-
+ing in cleaner and more precise retrieval sig-
+nals.
+• Modern Encoders:With the rapid develop-
+25
+26306
+
+========== PDF PAGE 26 / 27 ==========
+Triplets Resolving
+Example: Context Propositions: {context propositions}
+Fully Resolved Clue 1: Subject: Lothair II Predicate: has mother Object: Ermengarde of Tours
+Newly Searchable Clue 1: Subject: Ermengarde of Tours Predicate: died on Object: ?
+—
+Now apply the same process to the following clues: Use the context passages and propositions
+to resolve any ’?’ placeholders with as much detail as possible, grounding your answers in the
+passage content. Instructions:
+1. For searchable clues (one ’?’), replace ’?’ with the correct entity to fully resolve it, including
+any relevant attributes.
+2. For fuzzy clues (multiple ’?’), generate a Newly Searchable Clue by replacing one of the
+placeholders with the correct entity, including any relevant context.
+Original Query: {query}
+Searchable Clues: {searchable clues text}
+Fuzzy Clues: {fuzzy clues text}
+Context Passages: {context passages}
+Context Propositions: {context propositions}
+Previous Resolved Clues: {resolved clues context}
+Return two lists in this format:
+Fully Resolved Clue 1: Subject: ... Predicate: ... Object: ...
+Fully Resolved Clue 2: Subject: ... Predicate: ... Object: ...
+Newly Searchable Clue 1: Subject: ... Predicate: ... Object: ...
+Newly Searchable Clue 2: Subject: ... Predicate: ... Object: ...
+(Continue numbering accordingly)
+Final Answering
+Based on the reasoning clues, please answer the following question.
+Question: {query}
+Key Reasoning Clues: {total resolved clues + remaining searchable clues}
+Instructions:
+1. Analyze the question step by step
+2. Use the reasoning clues to understand what information is needed
+3. Provide ONLY a concise answer
+Answer format requirements:
+-ForWHquestions(who/what/where/when): Providetheexactentity, date, fullname, orfullplace
+name only
+- For yes/no questions: Answer only "yes" or "no"
+- No explanations, reasoning, or additional text
+- One entity or fact only
+Answer:
+ment of LLM-based embedding models, the
+semantic quality of triplet representations is
+high, and the dimensionality remains man-
+ageable. Quality can be further enhanced by
+scaling the number of dimensions or model
+parameters (Muennighoff et al., 2023).
+FAISS Efficiency.Regarding approximation er-
+rors in retrieval:
+• The approximation error in modern Approxi-
+mate Nearest Neighbor (ANN) libraries, such
+as FAISS, is theoretically bounded.
+• Noise from embedding retrieval is a universal
+challenge affecting all dense retrieval meth-
+ods—includingthoseusedtoconstructgraphs
+or retrieve chunks in baselines—and is not
+specific to T2RAG.
+26
+26307
+
+========== PDF PAGE 27 / 27 ==========
+G.4 Relation to Graph RAGs
+A key distinction of our method is shifting the
+graph construction phase fromoffline indexingto
+online inference. This approach does not discard
+structural information but rather adapts how it is
+utilized.
+Implicit Graph Construction vs. Explicit
+GraphsWhile recent works have explored ex-
+plicit graph construction during inference, few in-
+vestigateimplicit graph construction—providing
+necessary nodes (entities) and edges (relations) at
+the final answering stage without pre-hardwired
+connections. By allowing the LLM to construct
+necessary graph structures internally within its
+context window, T2RAG offers distinct advantages:
+• Handling Ambiguity:The model can nat-
+urally handle entity ambiguity and diverse
+reasoning structures (chains, trees, or DAGs)
+dynamically based on the query, avoiding re-
+liance on rigid, pre-defined schemas.
+• Leveraging Reasoning Models:Our exper-
+iments indicate that T2RAG benefits signifi-
+cantly from the enhanced reasoning capabili-
+ties of state-of-the-art models (e.g., Gemini-
+2.5-flash). In contrast, methods relying on
+rigid graph pre-processing (such as Hip-
+poRAG2 (Gutiérrez et al., 2025b) or RAP-
+TOR (Sarthi et al., 2024)) may not fully capi-
+talizeonthesegains,as"hard"graphstructures
+can constrain the "soft" reasoning power of
+the LLM.
+The"LocalityAssumption"andRetrievalEquiv-
+alence.We posit that complex offline graph con-
+structionisoftenunnecessaryforeffectiveretrieval
+due to thelocality assumption, particularly for
+questions within 3 hops.
+1. In Knowledge Graphs, a text chunk typically
+forms a star graph or a densely connected
+cluster.
+2. Traversingapre-builtsubgraphyieldsasimilar
+informationsettoourmethod,whichretrieves
+all triplets associated with a relevant chunk.
+T2RAG aggregates these triplets and allows the
+LLM to filter or combine them using the decom-
+posed query. This achieves a "PageRank-style"
+filtering effect but transfers the computational bur-
+den to the highly capable LLM during inference,
+rather than the indexing stage.
+EfficiencyandPerformanceTrade-off.T 2RAG
+maximizes efficiency compared to GraphRAG and
+performance compared to multi-round RAG. It
+offersarobustbalance,particularlyfor1-2hopQA
+applications,whileretainingthepotentialfordeeper
+reasoning as base models continue to improve.
+27
+26308

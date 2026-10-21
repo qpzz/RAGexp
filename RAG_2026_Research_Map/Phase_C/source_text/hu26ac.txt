@@ -1,0 +1,1331 @@
+
+
+========== PDF PAGE 1 / 24 ==========
+                                                 RAG without Forgetting:
+                                    Continual Query-Infused Key Memory
+
+
+
+
+                               Yuntong Hu1*  Sha Li2*  Naren Ramakrishnan2  Liang Zhao1
+
+                            Abstract
+      Retrieval-augmentedgeneration(RAG)systems
+      commonly improve robustness via query-time
+      adaptations such as query expansion and itera-
+      tive retrieval. While effective, these approaches
+      are inherently stateless: adaptations are recom-
+      putedforeachqueryanddiscardedthereafter,pre-
+      cluding cumulative learning and repeatedly incur-
+      ring inference-time cost. Index-side approaches
+      like key expansion introduce persistence but rely                    Figure 1.Comparison of Query Expansion (QE), Key Expan-
+      onoffline preprocessingor heuristicupdatesthat                       sion (KE), and Evolving Retrieval Memory (ERM).Left:QE
+      are weakly aligned with downstream task util-                        aligns queries to document space via inference-time expansions
+      ity, leading to semantic drift and noise accumu-                     thatarediscardedaftereachquery.Middle: KEpersistentlyaligns
+      lation. We proposeEvolving Retrieval Memory                          documentstoqueries throughofflineindexenrichmentbut incurs
+                                                                           high cost and drift.Right:ERM converts validated query ex-
+     (ERM), a training-free framework that transforms                      pansions into stable key updates, progressively aligns query and
+      transientquery-time gainsinto persistent retrieval                   document distributions with no inference-time overhead.
+      improvements. ERM updates the retrieval index                        constrained by retrieval quality, which upper-bounds down-
+      throughcorrectness-gatedfeedback,selectivelyat-                      stream generation.  In practice,query–corpus misalign-
+      tributesatomicexpansionsignalstothedocument                          ment,causedbysemanticgapsbetweenqueriesandindexed
+      keystheybenefit,andprogressivelyevolveskeys                          documents,ambiguousorunderspecifiedqueryintent,and
+     via stable, norm-bounded updates. We show that                        embedding anisotropy (Zhou et al.,2024) often leads to
+      query and key expansion are theoretically equiva-                    incomplete or imprecise retrieval, resulting in a dominant
+      lentunderstandardsimilarityfunctionsandprove                         recall bottleneck.
+      convergenceofERM’sselectiveupdates,amortiz-
+      ing optimal query expansion into a stable index                      Tomitigate, prior workhas exploredquery expansion (QE)
+     withzeroinference-timeoverhead. Experiments                           (Zhang et al.,2024;Ma et al.,2023b;Koo et al.,2024) by
+      onBEIRandBRIGHTacross13domainsdemon-                                 enriching query representations with paraphrases or aux-
+      strateconsistentgainsinretrievalandgeneration,                       iliary semantic signals to increase overlap with relevant
+      particularlyonreasoning-intensivetasks,atnative                      documents. While empirically effective, QE adapts at infer-
+      retrieval speed.                                                     ence time: expansions are recomputed for each query and
+                                                                           discardedafterward,yieldingonlytransientbenefits. Recent
+                                                                           advances of adaptive (Jeong et al.,2024), iterative (Jiang
+1. Introduction                                                            et al.,2025) and agentic RAG (Li et al.,2025c) interleave
+Retrieval-Augmented Generation (RAG) hasemerged as a                       retrieval withreasoning toenable multi-step search,reflec-
+leadingparadigmforknowledge-intensivetasksbyground-                        tion, and correction (Jeong et al.,2024;Jiang et al.,2025;
+ing generation in retrieved documents (Lewis et al.,2020;                  Lietal.,2025c). However,despiteimprovedper-queryro-
+Guu etal.,2020). Despiteenhancing factual accuracy and                     bustness,these methodsremainfundamentally stateless,as
+domain adaptability, end-to-end RAG performance remains                    retrieval adaptationsdo notpersist across queries,leading
+                                                                           to repeated computation and limited cumulative learning.
+  *Equal Contribution.  1Emory University 2Virginia Tech. Cor-
+respondence to: Yuntong Hu< yuntong.hu@emory.edu> , Liang                  As a complementary axis, key expansion (KE) (Yang et al.,
+Zhao<liang.zhao@emory.edu>.                                                2025;Chenetal.,2024b)enrichesdocumentrepresentations
+                                                                           in the retrieval index, but it is applied offline and query-
+Preprint. February 6, 2026.                                                agnostic, ignoring theonline query distribution and down-
+
+                                                                       1
+
+========== PDF PAGE 2 / 24 ==========
+stream task utility, thus isprone to semantic drift and noise                 ingatomicexpansionsignalstothekeystheybenefit,and
+accumulation. Besides, the computational and storage over-                    progressivelyevolvingtheretrievalindexthroughstable,
+head of precomputing enriched keys is significant, particu-                   norm-bounded updates without model retraining.
+larlyforlarge-scalecorpora,restrictingscalability. Memory-                 •  We theoretically prove that query and key expansions are
+augmentedRAGaddressesthese limitationsbyintroducing                           equivalentunderstandardsimilarityfunctions,andshow
+structuredor associativememory modules(JimenezGutier-                         thatourbounded,selectivekeyupdatesprovablyconverge,
+rez et al.,2024;Guti              ´errez et al.,2025) to store retrieved      amortizingthebenefits ofoptimalqueryexpansioninto a
+knowledgeorintermediatereasoningstates. Thisparadigm                          stable index with zero inference-time cost.
+improves over traditional KE- and QE-RAG in terms of                       •  We evaluate ERM on BEIR and BRIGHT across 13 do-
+incorporating structuredcontext. While promising,existing                     mains,withmultipleretrievers,andindexingstrategiesfor
+memory-augmented RAG systems often rely on heuristic                          retrieval andRAG.ERM consistentlyimproves retrieval
+or offline memory updates (Pan et al.,2025;Qian et al.,                       and generation performance, with pronounced gains on
+2025;Zhouetal.,2025)thatareweaklyalignedwithdown-                             reasoning-intensive tasks.  By consolidating successful
+streamtask utility,treat retrievaland memorymaintenance                       retrieval patterns and enabling query-conditional key spe-
+asdisjointprocesses(Zhouetal.,2025),andlackprincipled                         cialization,ERMscalespredictablywithexperiencewhile
+mechanismsformemoryselection,consolidation,andfor-                            operating at native retrieval speed, substantially outper-
+getting(Fuetal.,2025). Theselimitationshinderscalability,                     forming LLM-based query expansion in efficiency.
+long-term robustness, and effective cumulative learning.
+The above limitations of prior approaches stem not from                    2. Related Work
+isolated design choices, but from a structural separation
+between where adaptation occurs and how it is validated.                   2.1. Memory-Augmented Retrieval
+Query-centric(query-expansion)methodsadaptinresponse                       Memory-augmentedretrievalintroducesexplicitmemoryar-
+tothecurrentqueryandgenerationcontext,yetdiscardthese                      chitectures(Packeretal.,2023;Zhongetal.,2024;Chhikara
+adaptationsoncethequeryterminates,leadingtorepeated                        etal.,2025;Fangetal.,2025;Xuetal.,2025)thatpersist,
+computationandnocumulativelearning. Index-centric(key-                     organize, and adaptively reuse information from prior in-
+expansion) and memory-augmented methods, meanwhile,                        teractions or reasoning steps, improving retrieval quality
+introduce persistence but operate largely offline or with                  and efficiency (Du et al.,2025;Trivedi et al.,2023;Wang
+weaksupervision,withoutdirectalignmenttotask-levelsuc-                     et al.,2025). Unlike static corpus retrieval, these methods
+cess. Thisdisconnectpreventsprincipledcreditassignment:                    maintainevolvingmemorystatesthatsupportlong-horizon
+systemslackareliablesignalfordecidingwhichretrieval                        reasoning. Existing approaches differ primarily in memory
+behaviors are worth remembering and whichshould be for-                    sourceandgranularity. Segment-levelorworkingmemory
+gotten.                                                                    stores compressed intermediate contexts or evidence (Pan
+Consequently, effective long-term retrieval improvement                    et al.,2025;Yan et al.,2025), query-conditioned memory
+requiresjointlyreasoningoverquery-timesignalsandindex-                     selectivelyactivatesrelevantpastknowledgeviacuesorsig-
+time persistence.   Retrieval memory must evolve selec-                    nals (Fu et al.,2025;Liao,2025), and global or parametric
+tively, guided by verifiable correctness signals, and incre-               memory constructslong-term representations distilledfrom
+mentally, without destabilizing the retrieval space or in-                 accumulatedexperience(Qianetal.,2025). Tocapturestruc-
+curring inference-time overhead.  This observation moti-                   tural dependencies, several works adopt graph-structured
+vates our proposal forEvolving Retrieval Memory (ERM)                      memory, enabling relational retrieval and multi-hop reason-
+(Figure1), which explicitly bridges transient query expan-                 ing over entities and evidence (Liu et al.,2024a;Li et al.,
+sionsandpersistentkeyrepresentationsthroughcorrectness-                    2025a;JimenezGutierrezetal.,2024;Guti                        ´errezetal.,2025;
+gated updates, selective attribution, and stable accumula-                 Zhou et al.,2025).
+tion. By tightly coupling online adaptation with validated
+memory evolution, ERM transforms per-query gains into                      2.2. Retrieval-Augmented Generation (RAG)
+amortized improvements, overcomingthe statelessnessof                      RAGenhancesLLMperformanceforknowledge-intensive
+query-centricmethodsandthedrift-pronenatureofoffline                       tasks (Izacard et al.,2023;Lewis et al.,2020;Gao et al.,
+memory construction.                                                       2023b;Tang & Yang,2024;Xiong et al.,2024;Fan et al.,
+Our contributions can be summarized as follows:                            2024) by incorporating external knowledge.  Early effort
+•  We  propose  Evolving  Retrieval  Memory  (ERM),  a                     integrates retrieval into next-token prediction (Khandelwal
+  training-free  RAG  framework  that  converts  transient                 etal.,2020;Liuetal.,2024b;Izacard&Grave,2020;Wang
+  query-time adaptations into persistent retrieval improve-                et al.,2023), or end-to-end pipeline (Borgeaudet al.,2022;
+  ments by correctness-gated feedback, selectively attribut-               Izacard et al.,2023;Guu et al.,2020) to jointly optimize
+
+
+                                                                        2
+
+========== PDF PAGE 3 / 24 ==========
+theretrieverandgenerator. Researchincorporatesmodules                       achieve the highest similarity toq.
+like query refinement (Chan et al.,2024;Gao et al.,2023a;                   In practice, document keys are constructed using various
+Ma etal.,2023a), post-retrieval processing (Abdallah etal.,                 key-buildingstrategies,suchastitles,keywords,abstracts,
+2025;Xuetal.,2023)toimprovetheretrievalquality,and                          fulldocumentcontent,ordocumentchunking,withthegoal
+enhance theefficient useof retrieved contents(Jiang etal.,                  offilteringlow-informationtermsandimprovingretrieval
+2023;Maoetal.,2023;2024;Qianetal.,2024;Yanetal.,                            effectiveness. Keyconstructionistypicallyperformedglob-
+2024). Structure-augmented RAG involves tree (Fatehkia                      ally during an offline corpus indexing stage and remains
+et al.,2024;Li et al.,2025d;Hu et al.,2025), graph (Sarthi                  independent of individual online queries.
+et al.,2024;Edge et al.,2024;Guoet al.,2024) and hyper-
+graph (Feng et al.,2025;Luo et al.,2025;Wang & Han,                         Retrieval-AugmentedGeneration(RAG).ARAGsys-
+2025) to capture relational and multi-hop context and en-                   tem augments an LLM-based generatorπ  with a retriever.
+hance retrieval relevance. RAG synergize with reasoning                     Given a query q, the retriever returns the top-N   relevant
+capabilitiesforcomplextasks(Jeongetal.,2024;Leeetal.,                       documentsR K (q)   , whose values are passed as additional
+2024;Asai etal.,2024;Shao etal.,2023). Recentadvance                        context to the generator, yielding
+in DeepResearcher (Zheng et al.,2025;Li et al.,2025b;
+Huang et al.,2025) extends RAG by embedding retrieval                                        Y K (q)∼π       ·|q,{d     i}i∈R     K  (q)  ,               (2)
+into a broader, agentic research workflow that combines
+LLMreasoningwithdynamic toolusetosolveopen-ended,                           where Y K (q)∈ Y        denotes the generated response condi-
+complex tasks.                                                              tioned on the query and the document keysK.
+
+2.3. Query Expansion and Rewriting                                          Query Expansion.Query Expansion (QE) augments the
+Queryexpansionand rewritingmethods improve retrieval                        original query with additional related terms or reformula-
+by transforming the original query into a more effective                    tions to improve retrieval coverage by a query expansion
+search representation.  Classical approaches use pseudo-                    methodϕ . Formally, given a queryq∈Q    , a query expan-
+relevance feedback (Amati & Van Rijsbergen,2002) or                         sion methodϕproduces a set of expansion units
+lexical expansion via synonyms and related terms.  Neu-                                     c(q)={e            1,...,em }∼ϕ(·|q),               (3)
+ral methods rewrite queries using sequence-to-sequence
+models (Ma et al.,2023a) or generate hypothetical docu-                     yieldinganexpandedqueryrepresentationq′:={q}∪c(q)                .
+ments that serve as enriched query representations, as in                   Retrieval is then performed using the expanded query. In
+HyDE (Gao et al.,2023a).  Diversified expansion strate-                     modernretrievalandRAG systems. Theexpandedqueryis
+giessuch asDiverproducemultiple reformulationsto cover                      discarded after inference and induces no persistent modifi-
+different facets of the information need.  BGE-Reasoner-                    cation to the retrieval memory.
+Rewriter (Lan et al.,2025) combines retrieval-oriented rea-                 Althoughbothqueryexpansionandcorpuskeybuildingaim
+soningwithquery rewritinginasinglemodel. Whilethese                         to improve retrieval performance, they exhibit fundamental
+methodsimproveretrievalatinferencetime,theirgainsare                        limitations:
+transient: each query is expanded independently without
+accumulating knowledge from prior successful retrievals.                    •  Query expansion provides only transient gains and re-
+ERM differs fundamentally by converting these transient                        quires repeated augmentation at inference time;
+query-time signals into persistent key-side improvements,                   •  Key building is performed offline and globally, remain-
+enabling the retrieval index itself to evolve.                                 ingfixedthereafterandignoringtheactualonlinequery
+                                                                               distribution;
+3. Problem Formulation                                                      •  Corpus keys, query distributions, and downstream task
+                                                                               objectivesaredecoupled,preventingretrievalsystemfrom
+Retrieval Systems.Let             D={d          1,...,dn} be a corpus          being guided by task-level feedback.
+ofn  documents and letq∈Q      denote a user query. Each                    These limitations motivate a retrieval mechanism that is
+documentdi is indexed by a keyki ∈K  , yielding the key                     online,query-driven,efficient,andselectivelyupdatedonly
+setK={k         i}ni=1   , whereK  denotesthe retriever’s represen-         when validated by downstream task performance.
+tation space. A retrieval system is defined by a similarity
+function such as an inner-product:
+                                                                            4. Evolving Retrieval Memory
+                         S:Q×K→R,                           (1)
+                                                                            Modern retrieval systems can refresh corpus keys via pe-
+which scores every key against the query.  We denote by                     riodic re-embedding or re-indexing, but such updates are
+R K (q)⊂[n]            theindexsetoftheN   documentswhosekeys               typically corpus-wide and incur cost that scales with the
+
+                                                                         3
+
+========== PDF PAGE 4 / 24 ==========
+Figure2.IllustrationofERM.(a)Correctness-gatedverificationfilterstask-validatedqueryexpansionunits. (b)Selectiveattribution
+assigns expansion benefits to retrieved documents. (c) Softmax-normalized accumulation updates document keys.
+
+corpus size. Meanwhile, query expansion (QE) improves                        4.1. Correctness-Gated Feedback Verifier
+retrievalusingquery-specificsignals,butthegainsaretran-                      A central question in ERM is:when should query expan-
+sient because expansions are discarded after inference. A                    sionsbecachedandusedtoupdatekeys?retrievalrelated
+key observation is that real-world queries are highly long-                  tasks such as RAG are evaluated either by downstream
+tailed and Zipf-like (Beitzel et al.,2004;Downey et al.,                     task metrics, or both retrieval and downstream task metrics.
+2008;Zhang & Ross,2020), with repeated queries/intents                       Inpractice,different datasetspresentdifferentsupervision
+concentrating traffic on a small fraction of the corpus. This                regimes: (1)fullretrievalanddownstreamtaskgroundtruth,
+property implies thatfrequent global key updates are un-                     (2) downstream task-only supervision, or (3) no explicit
+necessaryand thatapplyingquery expansionuniformlyat                          ground truth (human-as-judge or LLM-as-judge regimes).
+inferencetimeisinefficient. Together,theseobservations
+motivate a lazy update strategy: keys should be updated
+only where repeated, task-solved queries provide reliable
+evidence.  Such selective updates yield amortized query-
+scalecostthat isindependentofthecorpus sizeinexpecta-                        Unified correctness signal.Let          V r denote aretrievalver-
+tion. Accordingly, we proposeEvolving Retrieval Memory                       ifier (e.g., recall@K or DPR match), and letV g  denote a
+(ERM), a training-free retrieval enhancement framework                       generation verifier (e.g., ROUGE, task loss, or LLM-as-
+thatselectively evolvesdocumentkeys using task-validated                     judge scoring). BothV r andV g  output binary correctness
+query expansion signals. Specifically,                                       indicators. Eachunderlyingmetricismappedto{0,1}        bya
+•  Section4.1introduces theCorrectness-Gated Feedback                        task-specific threshold or decision rule.
+  Verifier, which leverages feedback from RAG systems                        Given an expanded query representationq′:={q}∪c(q)                ,
+  to decide when memory evolution should be triggered                        where c(q) ={e            1,...,em } denotes the set of expansion
+  (Figure2(a)). Thismechanismgeneralizesacrossretrieval                      units produced by a query expansion method, we define a
+  methods and RAG scenarios.                                                 unified success indicator:
+•  Section4.2presentsSelective Expansion Attributionto
+  decompose query expansions into atomic semantic attri-
+  butions and assigns each attribution only to keys whose                     success(q            ′,K) :=1     V r R K (q  ′) +V    g Y K (q  ′)≥1  .
+  relevance is improved, bridging query expansion and key                                                                                        (4)
+  building (Figure2(b)).                                                     The expanded query is accepted if either retrieval correct-
+•  Section4.3introducesProgressive Key Evolutionas                           ness or generation correctness holds, preventing ERM from
+  shown in (Figure2(c)), an efficient accumulation and                       overfitting to a single subsystem.  Only expansion units
+  update mechanism that enables keys to evolve in a stable,                  validatedbythiscorrectness signalarecachedformemory
+  batchedmannerwithoutretraininganymodelparameters.                          evolution, thereby avoiding harmful or noisy updates. We
+                                                                             next introduce how these validated units are attributed to
+                                                                             individual document keys.
+
+                                                                         4
+
+========== PDF PAGE 5 / 24 ==========
+4.2. Selective Expansion Attribution                                           stores expansion units accumulated from past task-solved
+Evenwhenanexpansionisgloballyuseful,notallexpansion                            queries. Given a batch of queriesB , ERM computes query-
+components should update all retrieved documents. ERM                          localattributionweightsforeachqueryq∈B     tonormalize
+addresses this through a similarity–gain attribution mech-                     the relative contribution of its expansion units:
+anism that routes each expansion unit only to the keys for                                   w i,j(q)=softmax            ej∈c(q)     ∆  i,j(q)  ,            (6)
+which it provides positive retrieval benefit.
+For each retrieved document di by R K (q  ′) and each ex-                      where the softmax is taken over the expansion units gener-
+pansionunitej ∈c(q)        ,wemeasurethemarginalbenefitof                      atedfromthesamequery. Thesenormalizedcontributions
+assigningej tothedocumentkeywithrespecttotheoriginal                           arethenaggregatedacrossthebatchtoupdatethepersistent
+queryq:                                                                        relevance scores:
+
+ ∆  i,j(q) = sim(f(q), k                      i⊕f(e       j))−sim(f(q), k                      i),(5)si,j ←s    i,j + Xw i,j(q)∆      i,j(q),              (7)
+                                                                                                                q∈B
+where⊕  denotesa retriever-compatible keyaugmentation
+operator (additive composition:  ki ⊕v =k         i +v    ) that               wheresi,j denotes the accumulated relevance score of ex-
+appends the expansion representation f(e    j) to the key of                   pansionunitej fordocumentdi. Eachupdatedpair(e  j,si,j)
+document di, f(·)      maps queries and expansion units into                   isinsertedintotheexpansionmemoryu i,discardinglower-
+the retriever’s representation space, and sim(·,·)            is the re-       scoring entries when the capacity constraint is exceeded.
+trievalsimilarityfunction. Thisformulationisgroundedin                         We show that this scoring mechanism identifies the most
+thefollowingequivalencebetweenquery-sideandkey-side                            beneficial expansion units:
+expansion:                                                                     Proposition 4.2(Cumulative Consistency of Attribution
+Proposition 4.1(Query-Key EquivalenceUnder Semantic                            Scores). Fix a document            di  and suppose its key ki  re-
+Composition). Assume the retriever similarity                     sim(·,·)            ismains unchanged while ERM processes a sequence of
+bilinearormonotoneunderadditiveembeddings. Thenfor                             queries{q  t}Tt=1    drawn i.i.d. fromQ . For each expansion
+any expansion unite       j,                                                   unitej, define the expected gated attribution gainµ i,j :=
+       sim(f(q+e                 j),k  i)∝sim     f(q), k        i⊕f(e       j).E q∼Q   [1  i,j(q)w      i,j(q)∆      i,j(q)]   .  Then s(T)i,j /T        a.s.−−−→ µ          i,j
+                                                                               as T→ ∞       .  Moreover, if the x -th and (x+1)       -th largest
+Thus expanding queries is equivalent to expanding keys                         valuesamong{µ   i,j}j areseparatedbyanonzerogap,the
+withrespecttoretrievalrankingunderstandardsimilarity                           top-x  selection operatorτx(u  i) converges almost surely to
+operators.                                                                     the set ofxexpansion units with the largestµ           i,j.
+
+While correctness is verified using the expanded queryq′,                      Proof. SeeAppendixA.1.
+attributioniscomputedrelativetoq tocapturethemarginal                          When evolving document keys, ERM augments each key
+contributionofeachexpansionunit. Weretainanexpansion                           using the highest-scoring expansion units retained inu    i:
+unit fora givenkey onlyif it yieldsa positive retrievalgain
+over the original query, i.e.,∆>0.                                                               k (t+1)
+                                                                                                   i        =k    (t)i  ⊕f(τ       x(u  i)),                 (8)
+ERM operates through two complementary mechanisms:
+(1)Hot cachereinforcement: Forfrequentlyqueried docu-                          whereτx(u  i) returnsx  expansion units with the largest ac-
+ments,ERMstrengthenstheassociationbetweendocument                              cumulated relevance scores. This design ensures that key
+keys and successful query patterns, ensuring that similar                      evolution incorporates only strongly supported semantic ev-
+futurequeries reliablyretrieverelevantdocuments regard-                        idence, whiletheexpansion memorypreventsuncontrolled
+less of query expansion variability; (2)Relative ranking                       growth. Weestablishthattheresultingkeysequencescon-
+improvement: For long-tail documents that receive fewer                        verge to a stable index:
+keyupdates,theirrelativesimilaritytoqueriesincreasesas                         Theorem4.3(StabilityofKeySequences). Supposeexpan-
+other documents’ keys become more specialized, indirectly                      sionembeddingsarenorm-bounded,∥f(e      j)∥≤M         forallj.
+improving retrieval coverage.                                                  (i)In the offlinesetting, onlyfinitely manyevolution rounds
+4.3. Progressive Key Evolution                                                 are executed and each key converges tok∗i =k    (0)i   ⊕f(τ      ∗x ).
+                                                                               (ii)Intheonlinesetting,iftheper-roundkeydisplacement
+Toreducedriftfromnoisyorquery-specificexpansionsand                            satisfiesP  ∞r=0   ∥k   (r+1)i     −k    (r)i  ∥<∞       ,then{k   (r)i  } converges
+topreventtheaccumulationofirrelevantcorrelations,ERM                           toalimitk∗i ;ERM’ssaturationcriterionensuresthiscon-
+adoptsastrategyofbatched,progressiveevolution. Foreach                         ditionholdsbyterminatingeachroundoncethemarginal
+documentdi, ERM maintainsan expansion memoryu i that                           benefit diminishes.
+
+                                                                           5
+
+========== PDF PAGE 6 / 24 ==========
+                 Table1.RetrievalperformancewithandwithoutERMacrossBEIRandBRIGHTbenchmarks.WereportnDCG@1foralldatasets,
+                 with∆  rows showing percentage improvement from ERM. Results span sparse (BM25), open-source dense (BGE, GTE, MiniLM), and
+                 proprietary(Cohere, Voyage) retrievers. ERM consistentlyimprovesperformance, withthelargestgains onreasoning-intensivedatasets
+                 (LeetCode, Pony, AoPS, TheoremQA).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                 Proof. SeeAppendixA.2.                                                                gainfluctuations. Afterthekeyevolutionphasecompletes,
+                 Corollary  4.4(Expected  Consistency  Under  Additive                                 generation proceeds as
+                 Similarity). Under inner-product similarity                 sim(a,b) =                                    Y K ′(q)=G      q,{v    i}i∈R     K ′(q)  ,              (11)
+                 a⊤ b  and  additive  key  augmentation ki ⊕v  = k         i +
+                 v,  the  converged  top-x   selection  S ∗   satisfies S ∗   =                        where the queryq is executed directly against the evolved
+                 argmax     |S|=x     P j∈S    µ i,j, i.e., it maximises expected sim-                 document keys K  ′ at inference time.  The updated keys
+                 ilarity gain for future queries.                                                      provide high-recall retrieval without requiring further query
+                 Proof. SeeAppendixA.3.                                                                expansion, yielding both improved generation quality and
+                                                                                                       reduced inference latency.
+                 The branchof expandedqueries mayarise fromoffline pre-                                Finally,we showthat ERM’s expansioncost issublinear in
+                 processingoronlinestreaming. Intheonlinesetting,after                                 the query volume under realistic query distributions:
+                 each batch update the bufferB  is cleared and processing
+                 continues. Todeterminewhetherthecurrentbranchremains                                  Proposition 4.5(Amortized Expansion Cost). Assume
+                 informative, ERM evaluates its alignment gain:                                        queriesaredrawni.i.d.fromaZipf-likeintentdistribution
+                                   ∆ B  =    max                                                       with exponentα >1     . Then ERM’s cumulative expansion
+                                             (q,c(q    ′))∈B     maxi,j   ∆  i,j(q).               (9) cost growsasΘ(T       1/α   ), sublinearlyin the queryvolumeT ,
+                 ERM maintains the best branch gain observed so far, de-                               and its per-query amortized cost vanishes asT→∞.
+
+                 notedbymax   ∆ B 1,...,∆  B t	. Key evolutionterminates                              Proof. SeeAppendixA.4.
+                 viaapatience-based saturationcriterion: ifP  consecutive
+                 branch extensionsfailto exceed arelativemarginρ of theBEIR                                   StackExchange                                    Coding          Theorem-based      Avg.5. Empirical Evaluation
+                 best historical gain,
+Model               NFC.    Sci.     Bio.    Earth.   Econ.     Psy.     Rob.   Stack.    Sus.     Leet.     Pony      AoPS     TheoT.Dataset.Weevaluateourmethodon13datasetsfromthe
+                             ∆ B t+1   ≤(1−ρ)max           ∆ B 1,...,∆  B t	,      (10)Sparsemodel    BRIGHT (Su et al.,2024) and BEIR (Thakur et al.,2021)
+
+BM25                         20.7     35.4     46.6     42.2     27.2     31.7     22.8     27.4     28.7     13.4      36.6         0.9         7.9the index is deemed saturated and a batch evolution stepbenchmarks. Detailed dataset descriptions are provided in26.3
+BM25(w/ERM)           25.5     38.4     68.6     47.7     38.8     49.3     24.1     37.9     35.6     16.0      60.0        20.7        37.8istriggered,preventingprematurestoppingfromtransientAppendixB.1.38.5
+∆                          +23%      +8%     +47%      +13%      +43%     +56%      +6%      +38%     +24%      +19%       +64%      +2200%      +378%       +46%
+                                                                          DenseModel                6
+BGE-Large                  25.5     44.7     95.1     78.8     58.2     53.5     43.4     50.5     79.1     17.9      43.1         8.7         33.5           48.6
+BGE-Base                   28.2     42.8     96.0     79.6     62.1     51.5     45.4     51.3     79.1     15.8      57.8         7.0         24.5           49.3
+BGE-M3-Dense            21.3     37.2     81.5     73.5     48.4     41.4     46.3     43.7     67.8     15.8      68.3         6.1         28.3              44.6
+GTE-Base                   24.5     45.6     97.8     77.9     65.3     54.8     44.8     57.2     76.3     17.2      57.2         2.5         33.8           49.9
+MiniLM                      24.6     44.6     93.1     79.5     49.3     46.4     41.3     51.3     72.5     18.5      52.7         7.0         33.6          47.3
+BGE-Large(w/ERM)    26.5     45.1     91.3     80.4     58.8     55.1     40.4     55.6     75.9     25.8      87.5        20.1        61.3                   55.7
+∆                           +4%      +1%      -4%       +2%      +1%       +3%      -7%      +10%      -4%      +44%      +103%       +131%       +83%       +15%
+GTE-Base(w/ERM)      25.0     47.9     94.9     82.6     64.0     65.2     43.9     58.9     73.2     24.1      73.2        15.2        65.6                  56.4
+∆                           +2%      +5%      -3%       +6%       -2%     +19%      -2%      +3%       -4%      +40%       +28%       +508%       +94%       +13%
+                                                                       Proprietarymodels
+Cohere                        33.3     45.5     97.1     79.6     56.6     63.0     43.2     56.4     66.7     14.8      38.4         8.1         28.9        48.7
+Voyage                       35.1     48.0     98.2     84.0     64.0     66.3     42.9     60.2     72.9     13.1      41.0         8.6         30.7         50.8
+Cohere(w/ERM)          34.2     47.1     95.8     81.2     58.4     65.7     40.8     59.1     68.3     18.2      76.5        17.8        54.2                55.2
+∆                           +3%      +4%      -1%       +2%      +3%       +4%      -6%      +5%       +2%      +23%       +99%       +120%       +88%       +13%
+Voyage(w/ERM)          36.0     49.8     97.1     85.3     65.8     68.9     41.5     63.0     74.1     16.8      81.2        18.5        53.6                56.3
+∆                           +3%      +4%      -1%       +2%      +3%       +4%      -3%      +5%       +2%      +28%       +98%       +115%       +75%       +11%
+
+========== PDF PAGE 7 / 24 ==========
+Table2.End-to-endquestion-answeringperformancewithERM-augmentedretrieval.WeevaluateanswerqualityusingClaude-
+3.5-sonnetforbothgenerationandevaluationonStackExchangeQ&Adomains. ERMimprovesgenerationqualityacrossallretrievers,
+withBM25showingthelargestgain(+6%average)anddenseretrieversachieving+2–4%improvements,demonstratingthatimproved
+retrieval translates to better downstream task performance.
+
+                    Retriever                    Bio.      Earth.     Econ.      Psy.      Rob.     Stack.     Sus.     Average
+                    BM25                         71.8        74.5        69.8       74.8       71.4       76.4       69.5  72.6
+                    BM25 (w/ ERM)                79.9        77.8        73.0       76.1       76.4       80.5       72.5  76.6
+                    ∆                            +11%       +4%        +5%       +2%       +7%       +5%       +4%        +6%
+                    BGE-Large                    80.2        79.3        67.6       69.1       74.8       78.5       72.2  74.5
+                    GTE-Base                     80.5        81.6        74.4       77.5       75.3       79.7       73.1  77.4
+                    Cohere                       81.1        82.9        76.6       78.7       79.9       82.1       73.7  79.3
+                    BGE-Large (w/ ERM)           81.2        80.6        73.7       76.9       76.4       81.3       73.1  77.6
+                    ∆                            +1%        +2%        +9%       +11%      +2%       +4%       +1%        +4%
+                    GTE-Base (w/ ERM)            82.2        80.9        75.1       79.9       76.9       84.6       73.6  79.0
+                    ∆                            +2%        -1%        +1%       +3%       +2%       +6%       +1%        +2%
+                    Cohere (w/ ERM)              81.9        82.3        77.8       81.2       78.7       86.9       74.9  80.5
+                    ∆                            +1%        -1%        +2%       +3%       -2%       +6%       +2%        +2%
+
+
+
+
+
+
+
+
+
+
+
+
+
+                   (a)AoPS                                             (b)Psy                                          (c)TheoT
+
+Figure 3.Performancevs. latencytrade-off.Comparisonof retrieval performance(nDCG@10, leftbars) andinferencetime (logscale,
+right bars) for Naive Retrieval, ERM, and Query Expansion (HyDE). ERM achieves performance competitive with or exceeding HyDE
+while maintaining near-native retrieval latency (ms vs. seconds). Configuration: GTE-base retriever, 0.5 split rate, title indexing.
+Evaluation Metrics.We report normalized Discounted                            5.1. Main Results
+Cumulative Gain at rank 10 (nDCG@10) as the primary                          WeevaluateERMunderarepeatedholdoutadaptationpro-
+retrievalmetricandMeanReciprocal Rank(MRR)asasec-                             tocol,varyingthefractionofqueriesusedforkeyevolution
+ondary metric, following BEIRand BRIGHT conventions.                          from 0.3 to 0.8 (in increments of 0.1). For each split, docu-
+Forgenerationtasks,weusetheofficialevaluationmetrics                          mentkeysareresettotheirinitialstate,arandomlysampled
+provided by the BRIGHT benchmark.                                             subset of queries is used to perform adaptive key updates,
+                                                                              and retrieval performance is measured on the remaining
+                                                                              queries withoutfurther modification of theindex. We com-
+Baselines.We  include  representative  query  rewriting                       bine multiple query expansion strategies and random seeds
+and  expansion  approaches,   including  BGE-Reasoner-                        to assess robustness across different query orderings and
+Rewriter (Lan et al.,2025), clarification and specification,                  adaptationsubsets. Reportedresultsaggregateperformance
+T5L-TurboQueryRewriting(Maetal.,2023b),contrastive-,                          acrossalltestedconfigurations. Comprehensiveper-dataset
+facet-, and synonym-based expansion, HyDE query trans-                        results and ablation studies are provided inAppendixB.
+formation (Gao et al.,2023a), and query decomposition.
+ExperimentsareconductedinastandardRAGpipelinewith                             Consistent gains across domains and retrievers.As
+multipleindexrepresentations(title,keywords,abstract,and                      shown inTable1, ERM consistently improves retrieval
+full text) and a diverse set of retrievers, including sparse                  across all domains and retriever architectures, achieving
+methodssuch asBM25 (Robertsonet al.,1995) andBGE-                            +46%averagenDCGimprovementforBM25and+13–15%
+M3 (Chen et al.,2024a), dense retrievers such as BGE-                         for dense retrievers.   Gains are particularly pronounced
+Large/Base (Xiao et al.,2024), GTE-Base (Li et al.,2023),                     on reasoning-intensive datasets where surface-level lexical
+and MiniLM,as well as proprietaryembedding APIs (Co-                          overlap is low: LeetCode (+19–44%), Pony (+64–103%),
+here and Voyage). Details are provided inAppendixB.1.                        AoPS (+115–2200%), and TheoremQA (+75–378%). The
+
+                                                                          7
+
+========== PDF PAGE 8 / 24 ==========
+            (a)AoPS                               (b)Psy                           (c)TheoT                              (d)SCI
+Figure4.ERMperformanceasafunctionofadaptationbudget.nDCG@10onheld-outqueriesafterevolvingkeysusinganincreasing
+fraction (0.3–0.8) of disjointadaptation queries, with keys reset for each split. Results are shown for the GTE-baseretriever with HyDE
+query expansion and title-based indexing. Performance improves monotonically as ERM is allowed to adapt using more past queries.
+largest relative gains occur for weaker retrievers (BM25:                 have zero gold-document overlap across queries, meaning
++46%), while already-strong proprietary models (Voyage)                   key evolution from one query cannot directly benefit an-
+still gain +11%, indicating that ERM complements rather                   other’sgolddocuments. Despitethis,ERMyieldsconsistent
+than duplicates the underlying retrieval capability.                      BM25 gains (+6–47%), while dense retriever performance
+                                                                          remainswithin± 3%of baseline. This confirmsthat key up-
+Downstream generation quality.  As shown inTable2,                        datesbenefitthetriggeringquerywithoutdegradingretrieval
+ERMimprovesquestion-answeringperformanceacrossall                         quality for unrelated queries.
+retrievers,withBM25showing+6%averagegainanddense
+retrievers achieving +2–4%. Even when retrieval metrics                   5.3. Discussion
+show modest gains (e.g., Biology), generation quality im-                 ERM’simprovementsstemfromtwocomplementarymech-
+provesbecausegeneratorfeedbackdirectly informskey up-                     anisms: (1)Key enrichment for frequently queried docu-
+dates, creating a tighter retrieval-generation feedback loop.             ments: When adocument issuccessfully retrieved andused
+Inference time efficiency.  As shown inFigure3, ERM                       ingeneration,ERMupdatesitskeyrepresentationtobetter
+operates at native retrieval speed (150–280ms per query),                 alignwiththequery patternsthatledtosuccessfulretrieval.
+yielding a 50–100×  latency reduction compared to HyDE                    (2)Disambiguation through specialization: As document
+(7–15 seconds) while delivering comparable or superior                    keysbecomemorespecializedtowardtheirsuccessfulquery
+retrieval  quality.   Figure4further  shows  that  ERM’s                  patterns,thesemanticspacebecomeslesscrowded,reducing
+nDCG@10 improves monotonically as the adaptation bud-                     retrievalconfusionbetweensimilarbutdistinctdocuments.
+get increases from 0.3 to 0.8, confirming that key evolution              This is particularly beneficial for domains with high lexical
+accumulates useful signal rather than overfitting.                        overlap (e.g., theorem retrieval) where naive embeddings
+                                                                          struggletodistinguishbetweenrelatedconcepts. Apotential
+5.2. Analysis of ERM                                                      drawbackofERMisthatitspositivefeedbackloopmayre-
+                                                                          inforceearlyretrievalbiases,thoughthiscanbemitigatedby
+Robustnessacrossqueryexpansionmethods.   Asshown                          increasing the adaptation batch size and using more patient
+inFigure6, ERM improves for retrieval across all combi-                   stopping criteria to promote broader exploration.
+nations of query expansion methodsand retrievers on Leet-
+Code,withgainsrangingfrom+12%(FacetwithBM25)to                            6. Conclusion
++58% (HyDE withBGE-Large). Dense retrievers showthe                       WepresentedEvolvingRetrievalMemory(ERM),atraining-
+highestgains(+40–58%),confirmingthatERMandquery                           freeframeworkthatbridgesqueryexpansionandkeyexpan-
+expansion are complementary rather than redundant.                        sion by selectively persisting generator-validated evidence
+
+Effect ofindex methods.Title-based indexing combined                      into retrieval keys. Through correctness-gated feedback, se-
+with ERM produces the best results (inAppendixB.8),                       lectiveexpansionattribution,andprogressivekeyevolution,
+whilefull-documentembeddingyieldstheweakestbaseline.                      ERMaccumulatesvalidatedsemanticsignalsdirectlyinto
+Thissupportsatwo-stageapproach: titlesprovideconcise,                     thedocumentindexwithoutretraininganymodelparame-
+low-noise initialization, while ERM progressively enriches                ters. We further established formal guarantees that ERM
+keys based on downstream feedback.                                        updates never decrease retrieval alignment and that evolv-
+                                                                          ing keys converge to a stable index.  Experiments across
+Robustnessonlabel-disjointqueries.BRIGHTStackEx-                          diverse retrieval benchmarks, retrievers, and query expan-
+changedatasetsprovidea stringentstresstest: five datasets                 sion methods confirm that ERM consistently improves both
+
+
+                                                                      8
+
+========== PDF PAGE 9 / 24 ==========
+retrievalqualityanddownstreamgenerationaccuracywhile                    Downey,D.,Dumais,S.,Liebling,D.,andHorvitz,E. Un-
+operating at native retrieval latency.                                     derstanding the relationshipbetween searchers’ queries
+                                                                           and informationgoals. InProceedings ofthe 17th ACM
+References                                                                 conference onInformation andknowledge management,
+                                                                           pp. 449–458, 2008.
+Abdallah,A.,Piryani,B.,Mozafari,J.,Ali,M.,andJatowt,
+  A. Rankify: Acomprehensivepythontoolkitforretrieval,                  Du, X., Li, L., Zhang, D., and Song, L. Memr3: Memory
+  re-ranking, and retrieval-augmented generation.arXiv                     retrieval via reflective reasoning for llm agents.arXiv
+  preprint arXiv:2502.02464, 2025.                                         preprint arXiv:2512.20237, 2025.
+Amati,G.andVanRijsbergen,C.J. Probabilisticmodelsof                     Edge, D., Trinh, H., Cheng, N., Bradley, J., Chao, A.,
+  informationretrievalbasedonmeasuringthedivergence                        Mody, A., Truitt, S., Metropolitansky, D., Ness, R. O.,
+  from randomness.ACM Transactions on Information                          and Larson, J.  From local to global:  A graph rag ap-
+  Systems (TOIS), 20(4):357–389, 2002.                                     proachtoquery-focusedsummarization.arXivpreprint
+Asai, A., Wu, Z., Wang, Y., Sil, A., and Hajishirzi, H. Self-              arXiv:2404.16130, 2024.
+  rag: Learning to retrieve,generate,andcritiquethrough                 Fan, W., Ding, Y., Ning, L., Wang, S., Li, H., Yin, D.,
+  self-reflection. ICLR, 2024.                                             Chua, T.-S., and Li, Q.  A survey on rag meeting llms:
+Beitzel,S.M.,Jensen,E.C.,Chowdhury,A.,Grossman,D.,                         Towardsretrieval-augmentedlargelanguagemodels. In
+  andFrieder, O. Hourlyanalysis ofavery largetopically                     Proceedings of the 30th ACM SIGKDD conference on
+  categorized web query log. InProceedings of the 27th                     knowledge discovery and data mining, pp. 6491–6501,
+  annualinternationalACMSIGIRconferenceonResearch                          2024.
+  and development in information retrieval, pp. 321–328,                Fang, J., Deng, X., Xu, H., Jiang, Z., Tang, Y., Xu, Z.,
+  2004.                                                                    Deng,S., Yao,Y.,Wang,M.,Qiao,S., etal. Lightmem:
+Borgeaud,S.,Mensch,A.,Hoffmann,J.,Cai,T.,Rutherford,                       Lightweightandefficientmemory-augmentedgeneration.
+  E.,Millican,K.,VanDenDriessche,G.B.,Lespiau,J.-B.,                       arXiv preprint arXiv:2510.18866, 2025.
+  Damoc,B.,Clark, A.,etal. Improvinglanguagemodels
+  by retrieving from trillions of tokens.  InInternational              Fatehkia, M., Lucas, J. K., and Chawla, S. T-rag: lessons
+  conferenceonmachinelearning,pp.2206–2240.PMLR,                           from the llm trenches.arXiv preprint arXiv:2402.07483,
+  2022.                                                                    2024.
+Chan,C.-M., Xu,C.,Yuan,R.,Luo, H.,Xue,W., Guo,Y.,                       Feng, Y., Hu,H., Hou, X., Liu, S., Ying, S., Du,S., Hu, H.,
+  andFu,J. Rq-rag: Learningtorefinequeriesforretrieval                     and Gao, Y.  Hyper-rag: Combating llm hallucinations
+  augmentedgeneration.arXivpreprintarXiv:2404.00610,                       using hypergraph-driven retrieval-augmented generation.
+  2024.                                                                    arXiv preprint arXiv:2504.08758, 2025.
+Chen,  J.,  Xiao,  S.,  Zhang,  P.,  Luo,  K.,  Lian,  D.,              Fu, Y., Liu, D., Zhang, B., Jiang, Z., Mei, H., and Guan,
+  and Liu, Z.   M3-embedding:  Multi-linguality, multi-                    J. Cue rag: Dynamic multi-output cue memory under h
+  functionality,multi-granularitytextembeddingsthrough                     framework for retrieval-augmented generation.Neuro-
+  self-knowledge distillation.  In Ku, L.-W., Martins, A.,                 computing, pp. 130235, 2025.
+  and Srikumar, V. (eds.),Findings of the Association
+  for Computational Linguistics:  ACL 2024, pp. 2318–                   Gao, L., Ma, X., Lin, J., and Callan, J.   Precise zero-
+  2335, Bangkok, Thailand, August 2024a. Association                       shot dense retrieval without relevance labels. In Rogers,
+  for Computational Linguistics. doi: 10.18653/v1/2024.                    A., Boyd-Graber, J., and Okazaki, N. (eds.),Proceed-
+  findings-acl.137.   URL https://aclanthology.                            ings of the 61st Annual Meeting of the Association for
+  org/2024.findings-acl.137/.                                              Computational Linguistics (Volume 1: Long Papers), pp.
+Chen, W., Bai, T., Su, J., Luan, J., Liu, W., and Shi, C.                  1762–1777, Toronto, Canada, July 2023a. Association
+  Kg-retriever: Efficient knowledge indexing for retrieval-                for Computational Linguistics. doi: 10.18653/v1/2023.
+  augmented  large  language  models.arXiv  preprint                       acl-long.99. URLhttps://aclanthology.org/
+  arXiv:2412.05547, 2024b.                                                 2023.acl-long.99/.
+
+Chhikara,P.,Khant, D.,Aryan,S., Singh,T.,andYadav, D.                   Gao, Y., Xiong, Y., Gao, X., Jia, K., Pan, J., Bi, Y., Dai, Y.,
+  Mem0: Buildingproduction-readyaiagentswithscalable                       Sun, J., Wang, H., and Wang, H. Retrieval-augmented
+  long-term memory. arXiv preprint arXiv:2504.19413,                       generation for large language models: A survey.arXiv
+  2025.                                                                    preprint arXiv:2312.10997, 2(1), 2023b.
+
+                                                                     9
+
+========== PDF PAGE 10 / 24 ==========
+Guo, Z., Xia, L., Yu, Y., Ao, T., and Huang, C. Lightrag:                  onEmpiricalMethodsinNaturalLanguageProcessing,
+  Simple and fast retrieval-augmented generation.arXiv                     pp. 7969–7992, Singapore, December 2023. Association
+  preprint arXiv:2410.05779, 2024.                                         for Computational Linguistics. doi: 10.18653/v1/2023.
+Guti´errez,B.J.,Shu,Y.,Qi,W.,Zhou,S.,andSu,Y. From                         emnlp-main.495.   URL https://aclanthology.
+  rag to memory: Non-parametric continual learning for                     org/2023.emnlp-main.495/.
+  largelanguagemodels.arXivpreprintarXiv:2502.14802,                    Jiang,Z.,Sun,M.,Liang,L.,andZhang,Z. Retrieve,sum-
+  2025.                                                                    marize, plan: Advancing multi-hop question answering
+Guu, K., Lee, K., Tung, Z., Pasupat, P., and Chang, M.                     withaniterativeapproach. InCompanionProceedingsof
+  Retrieval augmented language model pre-training.  In                     the ACM on Web Conference 2025, pp. 1677–1686, 2025.
+  International conference on machine learning, pp. 3929–               Jimenez Gutierrez,B., Shu, Y., Gu,Y.,Yasunaga, M., and
+  3938. PMLR, 2020.                                                        Su, Y. Hipporag: Neurobiologically inspired long-term
+                                                                           memory for large language models.Advances in Neural
+Hu,  Y.,  Zhao,  Y.,  Zhao,  C.,  and Cohan,  A.    MCTS-                  InformationProcessingSystems,37:59532–59569, 2024.
+  RAG: Enhancing retrieval-augmented generation with                    Khandelwal,U.,Levy,O.,Jurafsky,D.,Zettlemoyer,L.,and
+  Monte Carlo tree search.   In Christodoulopoulos, C.,                    Lewis,M. Generalizationthroughmemorization: Nearest
+  Chakraborty,T.,Rose,C.,andPeng,V.(eds.),Findingsof                       neighborlanguagemodels.InternationalConferenceon
+  theAssociationforComputationalLinguistics: EMNLP                         Learning Representations, 2020.
+  2025,pp.12581–12597,Suzhou,China,November2025.
+  Association for Computational Linguistics. ISBN 979-                  Koo, H., Kim, M., and Hwang, S. J.  Optimizing query
+  8-89176-335-7. doi: 10.18653/v1/2025.findings-emnlp.                     generation for enhanced document retrieval in rag.arXiv
+  672.  URL https://aclanthology.org/2025.                                 preprint arXiv:2407.12325, 2024.
+  findings-emnlp.672/.
+Huang,Y.,Chen,Y.,Zhang,H.,Li,K.,Zhou,H.,Fang,M.,                        Lan, J., Chen, J., Liu, Z., Li, C., Bao, S., and Lian, D.
+  Yang, L.,Li, X., Shang, L.,Xu, S., etal. Deepresearch                    Retro*: Optimizing llms for reasoning-intensive docu-
+  agents: A systematic examination and roadmap.arXiv                       ment retrieval.arXiv preprint arXiv:2509.24869, 2025.
+  preprint arXiv:2506.18096, 2025.                                      Lee, M., An, S., and Kim, M.-S. PlanRAG: A plan-then-
+                                                                           retrieval augmented generation for generative large lan-
+Izacard,  G. and Grave,  E.    Distilling knowledge from                   guage models as decision makers. In Duh, K., Gomez,
+  reader to retriever for question answering.arXiv preprint                H.,and Bethard,S. (eds.),Proceedings ofthe 2024Con-
+  arXiv:2012.04584, 2020.                                                  ference of the North American Chapter of the Associa-
+Izacard, G., Lewis, P., Lomeli, M., Hosseini, L., Petroni,                 tion for Computational Linguistics: Human Language
+  F., Schick, T., Dwivedi-Yu, J., Joulin, A., Riedel, S., and              Technologies (Volume1: LongPapers), pp.6537–6555,
+  Grave, E.  Atlas: Few-shot learning with retrieval aug-                  MexicoCity,Mexico,June2024.AssociationforCompu-
+  mentedlanguage models.Journalof MachineLearning                          tationalLinguistics. doi: 10.18653/v1/2024.naacl-long.
+  Research, 24(251):1–43, 2023.                                            364.  URL https://aclanthology.org/2024.
+                                                                           naacl-long.364/.
+Jeong,   S.,   Baek,   J.,   Cho,   S.,   Hwang,   S.  J.,   and        Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V.,
+  Park, J.   Adaptive-RAG: Learning to adapt retrieval-                    Goyal,N.,K¨uttler,H.,Lewis,M.,Yih,W.-t.,Rockt¨aschel,
+  augmented  large  language  models  through  question                    T., et al. Retrieval-augmented generation for knowledge-
+  complexity.    In Duh,  K.,  Gomez,  H.,  and Bethard,                   intensive nlp tasks.Advances in neural information pro-
+  S. (eds.),Proceedings of the 2024 Conference of the                      cessing systems, 33:9459–9474, 2020.
+  North American Chapter of the Association for Com-
+  putational Linguistics: Human Language Technologies                   Li,  R.,  Dai,  Q.,  Zhang,  Z.,  Chen,  X.,  Dong,  Z.,  and
+  (Volume  1:   Long  Papers),  pp.  7036–7050,  Mexico                    Wen,J.-R. Knowtrace: Bootstrappingiterativeretrieval-
+  City,  Mexico,  June 2024. Association for Computa-                      augmented generation with structured knowledge tracing.
+  tional Linguistics.  doi:  10.18653/v1/2024.naacl-long.                  InProceedings of the 31st ACM SIGKDD Conference on
+  389.  URL https://aclanthology.org/2024.                                 Knowledge Discovery and Data Mining V. 2, pp. 1470–
+  naacl-long.389/.                                                         1480, 2025a.
+
+Jiang, Z., Xu, F., Gao, L., Sun, Z., Liu, Q., Dwivedi-Yu,               Li, X., Jin, J., Dong, G., Qian, H., Wu, Y., Wen, J.-R.,
+  J., Yang, Y., Callan, J., and Neubig, G. Active retrieval                Zhu, Y., and Dou, Z.  Webthinker: Empowering large
+  augmented generation.  In Bouamor, H., Pino, J., and                     reasoning models with deep research capability.arXiv
+  Bali, K. (eds.),Proceedings of the 2023 Conference                       preprint arXiv:2504.21776, 2025b.
+
+                                                                    10
+
+========== PDF PAGE 11 / 24 ==========
+Li,Y.,Zhang,W.,Yang,Y.,Huang,W.-C.,Wu,Y.,Luo,J.,                        Ma, X., Gong, Y., He, P., Zhao, H., and Duan, N.  Query
+  Bei,Y.,Zou,H.P.,Luo,X.,Zhao,Y.,etal. Towardsagen-                        rewriting in retrieval-augmented large language mod-
+  tic rag with deep reasoning: A survey of rag-reasoning                   els. InProceedings of the 2023 Conference on Empiri-
+  systems in llms.arXiv preprint arXiv:2507.09477, 2,                      cal Methods in Natural Language Processing, pp. 5303–
+  2025c.                                                                   5315, 2023b.
+
+Li,Z.,Zhang,X.,Zhang,Y.,Long,D.,Xie,P.,andZhang,                        Mao, K., Dou, Z., Mo, F., Hou, J., Chen, H., and Qian,
+  M.  Towards general text embeddings with multi-stage                     H. Large language models know your contextual search
+  contrastive learning.arXiv preprint arXiv:2308.03281,                    intent: Apromptingframeworkforconversationalsearch.
+  2023.                                                                    arXiv preprint arXiv:2303.06573, 2023.
+
+Li, Z., Ruan, Y., Liu, W., Wang, Z., and Yang, T.   Cft-                Mao, K., Liu, Z., Qian, H., Mo, F., Deng, C., and Dou,
+  rag:   An  entity  tree  based  retrieval  augmented  gen-               Z.  RAG-studio:  Towards in-domain adaptation of re-
+  eration algorithm with cuckoo filter.  arXiv preprint                    trieval augmentedgeneration throughself-alignment. In
+  arXiv:2501.15098, 2025d.                                                 Al-Onaizan,  Y.,  Bansal,  M.,  and Chen,  Y.-N. (eds.),
+                                                                          Findings  of  the  Association  for  Computational  Lin-
+Liao,  Z.    Ecphoryrag:  Re-imagining knowledge-graph                     guistics: EMNLP 2024, pp. 725–735, Miami, Florida,
+  rag via human associative memory.   arXiv preprint                       USA, November 2024. Association for Computational
+  arXiv:2510.08958, 2025.                                                  Linguistics.    doi:   10.18653/v1/2024.findings-emnlp.
+                                                                           41.    URL https://aclanthology.org/2024.
+Liu, Y., Peng, X., Du, T., Yin, J., Liu, W., and Zhang, X.                 findings-emnlp.41/.
+  ERA-CoT: Improving chain-of-thought through entity re-
+  lationshipanalysis. InKu,L.-W.,Martins, A.,andSriku-                  Packer, C., Fang, V., Patil, S., Lin, K., Wooders, S., and
+  mar,V. (eds.),Proceedings ofthe62ndAnnualMeeting                         Gonzalez,J. Memgpt: Towardsllmsasoperatingsystems.
+  oftheAssociationforComputationalLinguistics(Volume                       2023.
+  1:  Long Papers), pp. 8780–8794, Bangkok, Thailand,
+  August 2024a. Association for Computational Linguis-                  Pan,Z.,Wu,Q.,Jiang,H.,Luo,X.,Cheng,H.,Li,D.,Yang,
+  tics. doi: 10.18653/v1/2024.acl-long.476. URLhttps:                     Y., Lin, C.-Y., Zhao, H. V., Qiu, L., et al.  On memory
+  //aclanthology.org/2024.acl-long.476/.                                   construction and retrieval for personalized conversational
+                                                                           agents.ICLR, 2025.
+Liu, Z., Ping, W., Roy, R., Xu, P., Lee, C., Shoeybi, M., and
+  Catanzaro,B.Chatqa: Surpassinggpt-4onconversational                   Qian,H., Liu,Z.,Mao,K., Zhou,Y.,and Dou,Z. Ground-
+  qaandrag.AdvancesinNeuralInformationProcessing                           ing language model with chunking-free in-context re-
+  Systems, 37:15416–15459, 2024b.                                          trieval.   In Ku, L.-W., Martins, A., and Srikumar, V.
+                                                                           (eds.),Proceedings of the 62nd Annual Meeting of the
+Long, M., Sun, D., Yang, D., Wang, J., Luo, Y., Shen, Y.,                 Association for Computational Linguistics (Volume 1:
+  Wang, J., Zhou, H., Guo, C., Wei, P., et al.  Diver: A                   Long Papers), pp. 1298–1311, Bangkok, Thailand, Au-
+  multi-stageapproachforreasoning-intensiveinformation                     gust 2024. Association for Computational Linguistics.
+  retrieval.arXiv preprint arXiv:2508.07995, 2025.                         doi:  10.18653/v1/2024.acl-long.71.  URL https://
+                                                                           aclanthology.org/2024.acl-long.71/.
+Luo,  H.,  Chen,  G.,  Zheng,  Y.,  Wu,  X.,  Guo,  Y.,  Lin,
+  Q.,  Feng,  Y.,  Kuang,  Z.,  Song,  M.,  Zhu,  Y.,  et al.           Qian,H.,Liu,Z.,Zhang,P.,Mao,K.,Lian,D.,Dou,Z.,and
+  Hypergraphrag:   Retrieval-augmented  generation  via                    Huang, T. Memorag: Boosting long context processing
+  hypergraph-structured knowledge representation.arXiv                     with globalmemory-enhanced retrievalaugmentation. In
+  preprint arXiv:2503.21322, 2025.                                         Proceedings of the ACM on Web Conference 2025, pp.
+                                                                           2366–2377, 2025.
+Ma, X., Gong, Y., He, P., Zhao, H., and Duan, N.  Query
+  rewriting in retrieval-augmented large language mod-                  Robertson, S. E., Walker, S., Jones, S., Hancock-Beaulieu,
+  els.  In Bouamor, H., Pino, J., and Bali, K. (eds.),Pro-                 M. M., Gatford, M., et al.Okapi at TREC-3.  British
+  ceedings of the 2023 Conference on Empirical Meth-                       Library Research and Development Department, 1995.
+  ods in Natural Language Processing, pp. 5303–5315,
+  Singapore,December2023a.AssociationforComputa-                        Sarthi,P.,Abdullah,S.,Tuli,A.,Khanna,S.,Goldie,A.,and
+  tional Linguistics. doi: 10.18653/v1/2023.emnlp-main.                    Manning,C.D. Raptor: Recursiveabstractiveprocessing
+  322.  URL https://aclanthology.org/2023.                                 fortree-organizedretrieval. InInternationalConference
+  emnlp-main.322/.                                                         on Learning Representations (ICLR), 2024.
+
+                                                                    11
+
+========== PDF PAGE 12 / 24 ==========
+Shao, Z., Gong, Y., Shen, Y., Huang, M., Duan, N., and                  Wang,J.,Zhao,R.,Wei,W.,Wang,Y.,Yu,M.,Zhou,J.,Xu,
+  Chen,  W.    Enhancing retrieval-augmented large lan-                    J., and Xu, L. Comorag: A cognitive-inspired memory-
+  guage models with iterative retrieval-generation syn-                    organizedrag for statefullong narrative reasoning.arXiv
+  ergy.       In  Bouamor,   H.,   Pino,   J.,   and  Bali,   K.           preprint arXiv:2508.10419, 2025.
+  (eds.),Findings of the Association for Computational                  Xiao, S.,Liu, Z., Zhang, P., Muennighoff, N., Lian,D., and
+  Linguistics:   EMNLP  2023,  pp.  9248–9274,  Singa-                     Nie,J.-Y. C-pack: Packedresources forgeneral chinese
+  pore, December 2023. Association for Computational                       embeddings.  InProceedings of the 47th international
+  Linguistics.    doi:   10.18653/v1/2023.findings-emnlp.                  ACMSIGIRconferenceonresearchanddevelopmentin
+  620.  URL https://aclanthology.org/2023.                                 information retrieval, pp. 641–649, 2024.
+  findings-emnlp.620/.
+Su,  H.,  Yen,  H.,  Xia,  M.,  Shi,  W.,  Muennighoff,  N.,            Xiong,  G.,  Jin,  Q.,  Lu,  Z.,  and  Zhang,  A.     Bench-
+  Wang,  H.-y.,  Liu,  H.,  Shi,  Q.,  Siegel,  Z. S.,  Tang,              marking retrieval-augmented generation for medicine.
+  M., et al.   Bright:  A realistic and challenging bench-                 In Ku,  L.-W.,  Martins,  A.,  and Srikumar,  V. (eds.),
+  mark for reasoning-intensive retrieval.arXiv preprint                    Findings  of  the  Association  for  Computational  Lin-
+  arXiv:2407.12883, 2024.                                                  guistics:  ACL 2024, pp. 6233–6251, Bangkok, Thai-
+                                                                           land,  August  2024.  Association  for  Computational
+Tang,  Y. and Yang,  Y.    Multihop-rag:   Benchmarking                    Linguistics.        doi:     10.18653/v1/2024.findings-acl.
+  retrieval-augmented generation for multi-hop queries,                    372.  URL https://aclanthology.org/2024.
+  2024.                                                                    findings-acl.372/.
+Thakur, N., Reimers, N., R¨uckl´e, A., Srivastava, A., and              Xu, F., Shi, W., and Choi, E. Recomp: Improving retrieval-
+  Gurevych, I.   BEIR: A heterogeneous benchmark for                       augmented lms with compression and selective augmen-
+  zero-shot evaluation of informationretrieval models. In                  tation.arXiv preprint arXiv:2310.04408, 2023.
+  Thirty-fifth Conference on Neural Information Process-                Xu,W.,Liang,Z.,Mei,K.,Gao,H.,Tan,J.,andZhang,Y.
+  ingSystemsDatasetsandBenchmarksTrack(Round2),                            A-mem: Agentic memory for llm agents.arXiv preprint
+  2021.  URLhttps://openreview.net/forum?                                  arXiv:2502.12110, 2025.
+  id=wCu6T5xFjeJ.
+Trivedi, H., Balasubramanian, N., Khot, T., and Sabharwal,              Yan,S.,Yang,X.,Huang,Z.,Nie,E.,Ding,Z.,Li,Z.,Ma,
+  A. Interleavingretrievalwithchain-of-thoughtreasoning                    X.,Kersting,K.,Pan,J.Z., Sch¨utze,H.,etal. Memory-
+  forknowledge-intensivemulti-stepquestions. InRogers,                     r1: Enhancing large language model agents to manage
+  A., Boyd-Graber, J., and Okazaki, N. (eds.),Proceed-                     andutilizememoriesvia reinforcementlearning.arXiv
+  ings of the 61st Annual Meeting of the Association for                   preprint arXiv:2508.19828, 2025.
+  Computational Linguistics (Volume 1: Long Papers), pp.                Yan,  S.-Q.,  Gu,  J.-C.,  Zhu,  Y.,  and Ling,  Z.-H.    Cor-
+  10014–10037, Toronto, Canada, July 2023. Association                     rective retrieval augmented generation.arXiv preprint
+  for Computational Linguistics. doi: 10.18653/v1/2023.                    arXiv:2401.15884, 2024.
+  acl-long.557.URLhttps://aclanthology.org/
+  2023.acl-long.557/.                                                   Yang, P., Li, X., Hu, Z., Wang, J., Yin, J., Wang, H., He, L.,
+Wang, B., Ping, W., Xu, P., McAfee, L., Liu, Z., Shoeybi,                  Yang,S.,Wang,S.,Huang,Y.,etal. Heterag: Ahetero-
+  M., Dong, Y., Kuchaiev, O., Li, B., Xiao, C., et al.                     geneous retrieval-augmented generation framework with
+  Shall we pretrain autoregressive language models with                    decoupled knowledge representations.arXiv preprint
+  retrieval? acomprehensivestudy. InProceedingsofthe                       arXiv:2504.10529, 2025.
+  2023 conference on empirical methods in natural lan-                  Zhang, L., Wu, Y., Yang, Q., and Nie, J.-Y. Exploring the
+  guage processing, pp. 7763–7786, 2023.                                   best practices of query expansion with large language
+Wang, J. and Han, J.  PropRAG: Guiding retrieval with                      models. InAl-Onaizan,Y.,Bansal,M.,andChen,Y.-N.
+  beam search over proposition paths. In Christodoulopou-                  (eds.),FindingsoftheAssociationforComputationalLin-
+  los,  C.,  Chakraborty,  T.,  Rose,  C.,  and  Peng,  V.                 guistics: EMNLP2024, pp.1872–1883,Miami, Florida,
+  (eds.),Proceedings  of  the  2025  Conference  on  Em-                   USA, November 2024. Association for Computational
+  pirical Methods in Natural Language Processing, pp.                      Linguistics.    doi:   10.18653/v1/2024.findings-emnlp.
+  6212–6227,  Suzhou,  China,  November  2025.  Asso-                      103.   URL https://aclanthology.org/2024.
+  ciation  for  Computational  Linguistics.     ISBN  979-                 findings-emnlp.103/.
+  8-89176-332-6.    doi:  10.18653/v1/2025.emnlp-main.                  Zhang, W. and Ross, K. A.  Exploiting data skew for im-
+  317.  URL https://aclanthology.org/2025.                                 provedqueryperformance.IEEETransactionsonKnowl-
+  emnlp-main.317/.                                                         edge and Data Engineering, 34(5):2176–2189, 2020.
+
+                                                                    12
+
+========== PDF PAGE 13 / 24 ==========
+Zheng, Y., Fu,D., Hu,X., Cai,X., Ye, L.,Lu, P., and Liu,P.
+  DeepResearcher: Scalingdeepresearchviareinforcement
+  learninginreal-worldenvironments. InChristodoulopou-
+  los, C., Chakraborty, T., Rose, C., and Peng, V. (eds.),
+  Proceedings ofthe 2025Conference on EmpiricalMeth-
+  ods  in  Natural  Language  Processing,  pp.  414–431,
+  Suzhou, China, November 2025. Association for Com-
+  putational Linguistics.  ISBN 979-8-89176-332-6.  doi:
+  10.18653/v1/2025.emnlp-main.22.    URL https://
+  aclanthology.org/2025.emnlp-main.22/.
+
+Zhong,W.,Guo,L.,Gao,Q.,Ye,H.,andWang,Y. Memo-
+  rybank: Enhancinglargelanguagemodelswithlong-term
+  memory. InProceedings of the AAAI Conference on Arti-
+  ficial Intelligence, volume 38, pp. 19724–19731, 2024.
+
+Zhou, C., Zhang, C., Yu, G., Meng, F., Zhou, J., Lam, W.,
+  and Yu, M. Improving multi-step rag with hypergraph-
+  based memoryfor long-context complex relational mod-
+  eling.arXiv preprint arXiv:2512.23959, 2025.
+
+Zhou, X., Gao, Y., Jie, X., Cai, X., Bu, J., and Wang, H.
+  Ease-dr: Enhanced sentence embeddings for dense re-
+  trieval.  InProceedings of the 47th International ACM
+  SIGIR Conference on Research and Development in In-
+  formation Retrieval, pp. 2374–2378, 2024.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                    13
+
+========== PDF PAGE 14 / 24 ==========
+A. Proofs of Theoretical Guarantees
+This section provides proofs for the theoretical results stated inSection4.3.  All guarantees are local (per document),
+non-parametric, and do not rely on optimizing a global retrieval objective.
+
+A.1. Proof of Proposition4.2(Cumulative Consistency)
+Proof.Define the per-query attribution increment
+
+                                                        X  (i,j)t     :=1     i,j(q  t)w   i,j(q  t)∆  i,j(q  t).
+
+Since queries are i.i.d. and keys are fixed,{X          (i,j)t   }t≥1     is an i.i.d. sequence of nonnegative random variables.
+
+Boundedness.Because                    w i,j(q)∈[0,1]              and similarity gains are bounded for bounded embeddings, X  (i,j)t       has finite
+expectation.
+Consistency.By the strong law of large numbers,
+                                                  s(T)            TX
+                                                    i,j              X  (i,j)    a.s.−−−→E[X                 (i,j)
+                                                    T    =   1T         t                     1    ]=µ    i,j.
+                                                                t=1
+
+Top-x  selection.Under the strict gap assumption, eventual ordering of              s(T)i,j   matches that ofµ i,j almost surely. Since the
+number of expansion units is finite, the top-xselection stabilises.
+RemarkA.1(Snapshot approximation). Proposition4.2assumes fixedkeys toensure i.i.d.attributionincrements. InERM,
+keysevolveonlyafterbatchedevolutionsteps. Betweensuchsteps,keysremainunchanged,andthepropositionapplies to
+queries processed within each interval. As ERM approaches saturation, evolution steps become increasingly infrequent,
+improving the accuracy of this snapshot approximation.
+
+A.2. Proof of Theorem4.3(Stability)
+Proof.  Part (i).A finite query stream yields finitely many batches, hence finitely many evolution steps. At each step
+∥k   (t+1)i     −k    (t)i  ∥ ≤xM       , so the total displacement is finite and{k   (t)i  } is Cauchy in a complete space. The limit equals
+k (0)i   ⊕f(τ      ∗x )since the final top-xselection determines the augmentation.
+Part (ii).Finite total displacement implies the sequence isCauchy and therefore converges.
+
+A.3. Proof of Corollary4.4(Expected Consistency)
+Proof.  ByProposition4.2,thetop-                   x  operatorconvergesa.s.totheindiceswiththelargestµ i,j. Underadditiveaugmentation
+and inner-product similarity, the gated similarity gain from a setSof expansion units for a future queryqis
+
+                                   sim  f(q), k        i + Pj∈S    f(e    j)−sim    f(q), k        i  =  Xf(q)    ⊤ f(e    j),
+                                                                                                       j∈S
+where the equality uses bilinearity of the inner product. Taking the expectation overq∼Q      weighted by the attribution
+indicators and softmax routing givesP                j∈S    µ i,j. This sum is maximised by selecting thex  indices with the largestµ i,j,
+which is exactlyS         ∗.
+RemarkA.2 (Scope of applicability). Corollary4.4relies on additive similarity structure. It applies exactly to unnormalised
+dense retrievers and approximatelyto cosine-similaritymodels whenkey normsvaryslowly. It doesnot extendto sparseor
+late-interaction retrievers, where the result is interpreted as a consistency property of ERM’s attribution mechanism rather
+than a global optimality guarantee.
+
+A.4. Proof of Proposition4.5(Amortized Cost)
+Proof.  LetD  T  denote the number of distinct intents observed inT  queries, and letpr =r   −α   /H   m,α    be the probability1−(1−p             r)T .  Split the sum at the threshold r∗  =
+of intent r, where H  m,α    =  P  mr=1   r−α   .  ThenE[D      T ] =  P  mr=1
+⌊(T/H       m,α  )1/α  ⌋:
+
+                                                                              14
+
+========== PDF PAGE 15 / 24 ==========
+•Head intents(r≤r                ∗):Tp    r ≥1, so1−(1−p                      r)T ≥1−e       −1   , contributingΩ(r           ∗)=Ω(T        1/α   ).
+•Tail intents(r >r              ∗):Tp    r <1, so1−(1−p                      r)T ≤Tp     r. The tail sum isPr>r  ∗ Tp  r =Θ   T·(r    ∗)1−α    =Θ(T         1/α   ).
+
+Both parts give Θ(T       1/α   ), confirmingE[D      T ] = Θ(T         1/α   ).  ERM performs expansion at most once per distinct intent,
+yielding total costD         T ·C  ϕ  versusT·C              ϕ  for full QE. The expected ratio isΘ(T          1/α−1       )→0asT→∞.
+
+B. Experiments
+
+Thissectionprovidesdetaileddescriptionsoftheretrievers,documentindexingmethods,andqueryexpansiontechniques
+evaluated in our experiments.
+
+B.1. Dataset
+We evaluate on 13 datasets from two benchmarks: BRIGHT (Su et al.,2024) and BEIR (Thakur et al.,2021). BRIGHT
+providesbothretrievalrelevancejudgmentsandgenerationgroundtruth(goldanswers),enablingend-to-endRAGevaluation.
+BEIRprovidesonlyretrieval-levelrelevancelabelswithoutgenerationgroundtruth. Datasetstatisticsaresummarizedin
+Table3.
+
+BRIGHT–StackExchangeQ&A(7datasets).ThesedatasetsaresourcedfromStackExchangeforumsspanningdiverse
+domains: Biology,EarthScience,Economics,Psychology,Robotics,StackOverflow,andSustainableLiving. Eachqueryis
+a reasoning-intensivequestion posted by a real user, andthe corpus consists of all answers withinthe corresponding forum.
+Queriesrequiremulti-stepreasoningtoidentifyrelevantdocuments,assurface-levellexicaloverlapbetweenqueriesand
+golddocumentsistypicallylow. Thenumberofqueriesrangesfrom101(Psychology,Robotics)to118(EarthScience),
+with corpus sizes from 50K to 122K documents.
+
+BRIGHT – Coding & Math (4 datasets).LeetCode contains competitive programming problems paired with solution
+discussions;PonyconsistsofqueriesaboutthePonyprogramminglanguagematchedtodocumentationpages;AoPS(Artof
+ProblemSolving)containsmathcompetitionproblemswiththeorem-basedsolutions;andTheoremQA-Tpairsmathematical
+questionswithrelevanttheorems. Thesedatasetsareparticularlychallengingforretrieval,asqueriesanddocumentsare
+expressed indifferent modalities (e.g.,a problem statementvs. a theoremor code solution). Corpus sizes vary widely from
+7.9K (Pony) to 414K (LeetCode).
+
+BEIR(2datasets).NFCorpusisamedicalinformationretrievaldatasetwith323queriesover3.1Kdocuments,where
+relevance is graded on a multi-level scale. SciDocs evaluates scientific document retrieval with 1,000 queries over 4K
+documents. Unlike BRIGHT, these datasets provide only retrieval relevance labels and do not include generation-level
+ground truth, so we evaluate them on retrieval metrics only.
+
+B.2. Retrievers
+We evaluate nine retrieval models spanning different architectures, including open-source encoders and commercial
+embedding APIs:
+
+Open-Source Models.
+
+•  GTE-base(Lietal.,2023): GeneralTextEmbeddingsmodelfromAlibabaDAMOAcademy. A110Mparameterencoder
+  trained on large-scale text pairs with contrastive learning. Produces 768-dimensional embeddings optimized for semantic
+  similarity.
+•  BGE-base-en-v1.5(Xiao et al.,2024): BAAI General Embedding model (base version). A 110M parameter BERT-based
+  encoder with instruction-tuned embeddings. Known for strong performance on MTEB benchmark.
+•  BGE-large-en-v1.5(Xiaoetal.,2024): LargevariantofBGEwith 335Mparametersand1024-dimensionalembeddings.
+  Offers improved representation capacity at the cost of higher computational requirements.
+•  BGE-M3(Chenetal.,2024a): Multi-Functionality,Multi-Linguality,andMulti-Granularityembeddingmodel. Supports
+  dense, sparse, and multi-vector retrieval in a single model. Particularly effective for cross-lingual and long-document
+  retrieval.
+
+                                                                       15
+
+========== PDF PAGE 16 / 24 ==========
+Table 3.Dataset statistics. #Q: number of queries; #D: corpus size; #D+: average number of positive (relevant) documents per query;
+Q.L./D.L.: average query/document length (GPT-2 tokens). Gen. GT indicates whether generation ground truth is available.
+
+                             Benchmark     Dataset                  #Q           #D   #D+    Q.L.     D.L.   Gen. GT
+                                               Biology                 103     57,364     3.6     83.6   115.2✓
+                                               Earth Science        118   122,388     7.7   132.4   113.3✓
+                                               Economics            103     50,221     8.0   120.2   181.5✓
+                             BRIGHT-SE         Psychology           101     52,841     7.3   118.2   149.6✓
+                                               Robotics                101     62,198     5.5   120.6   818.9✓
+                                               StackOverflow      117   101,100     7.0   704.5   478.3✓
+                                               Sust. Living           108     60,732     5.6   108.0   148.5✓
+                                               LeetCode              142   413,932     1.8   483.1   497.5✓
+                             BRIGHT-CM         Pony                      112       7,894   22.5     98.3   102.6✓
+                                               AoPS                     111   188,177     4.7     89.0   250.5✓
+                                               TheoremQA-T      206   188,177     3.2   117.1   250.5✓
+
+                             BEIR                NFCorpus             323       3,129   38.2        —        —     ✗SciDocs              1,000       4,021     4.9        —        —     ✗
+
+•  MiniLM(all-MiniLM-L6-v2): Distilled22MparametermodelfromMicrosoft. Optimizedforspeedwith384-dimensional
+  embeddings. Provides a good balance between efficiency and quality for resource-constrained settings.
+•  DistilBERT(distilbert-base-uncased): A 66M parameter distilled version of BERT. While not specifically trained for
+  retrieval, serves as a baseline for general-purpose language model embeddings.
+•  BM25(sparse): ClassiclexicalretrievalusingOkapiBM25scoring. Servesasanon-neuralbaselinethatreliesonexact
+  term matching and TF-IDF weighting.
+
+Commercial Embedding APIs.
+•  Cohere Embed v3(embed-english-v3.0):  Cohere’s state-of-the-art embedding model producing 1024-dimensional
+  vectors.  Trained on diverse web data with compression-aware training for efficient retrieval.  Supports input types
+  (search   document, search        query) for asymmetric retrieval.
+•  Voyage-2(voyage-2): Voyage AI’s general-purpose embedding model optimized for retrieval tasks. Produces 1024-
+  dimensional embeddings with strong performance on domain-specific benchmarks. Offers good balance between quality
+  and API cost.
+
+B.3. Document Indexing Methods
+We evaluate four document indexing strategies that determine which portion of each document is embedded for retrieval:
+
+•  Full Document (none): Embeds the entire document content. Captures comprehensive information but may introduce
+  noise for long documents and exceed model context limits.
+•  Title: Embeds only the document title or heading. Provides concise representation that often captures the main topic.
+  Particularly effective for Q&A forums where titles are written as questions.
+•  Abstract: Embedsthedocumentabstractorsummary. Balancescomprehensivenesswithconciseness. Mostapplicableto
+  scientific papers and structured documents.
+•  Keywords: Embedsextractedkeywordsorkeyphrases. Focusesonthemostsalientterms,reducingnoisefromboilerplate
+  content. Keywords are extracted using TF-IDF weighting and domain-specific heuristics.
+
+B.4. Query Expansion Methods
+We evaluate nine query expansion techniques that augment the original query before retrieval. These methods fall into
+three categories: (1) LLM-based generation methods thatuse language models to transform or expand queries, (2) neural
+rewriting methods that use specialized encoder models, and (3) classical IR methods based on lexical analysis.
+
+LLM-Based Methods.
+
+                                                                           16
+
+========== PDF PAGE 17 / 24 ==========
+           •  HyDE(HypotheticalDocument Embeddings) (Gaoet al.,2023a): Generates a hypotheticalanswer to thequery using an
+             LLM, then uses that answer as the search query. Bridges the lexical gap between questions and answers by transforming
+             the query into the document space.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+           •  Diver(Long etal.,2025): Diversifiedquery expansionthat generatesmultiplealternative queryformulations tocapture
+             different aspects of the information need. Aggregates results from diverse query variants to improve recall.
+
+
+
+
+
+HyDE: Hypothetical Document Generation
+
+<task>
+You  are  an  expert  knowledge  synthesizer  implementing  HyDE  (Hypothetical  Document
+Expansion).    Your  task  is  to  generate  a  comprehensive,  detailed  hypothetical
+document  that  would  perfectly  answer  the  given  question.
+</task>
+
+<query>
+{query}
+</query>
+
+<instructions>
+DIVER: Iterative Query Refinement (Round 1)
+First,  analyze  the  question  thoroughly  in  a  <think>  section:
+
+1.    QUESTION  ANALYSIS  -  What  is  the  core  question  being  asked?Given  a  query  and  the  provided  passages  (some  may  be  irrelevant),  identify  helpful
+information  and  write  an  improved  query  that  incorporates  relevant  details.
+2.    DOMAIN  IDENTIFICATION  -  What  field  does  this  belong  to?•  Decomposition: Breaks complex queries into simpler sub-queries using chain-of-thought reasoning. Each sub-query
+3.    ANSWER  STRUCTURE  PLANNING  -  How  should  a  comprehensive  answer  be  organized?retrieves independently, and results are merged. Particularly effective for multi-hop reasoning questions.
+Query:
+4.    TERMINOLOGY  MAPPING  -  What  technical  terms  are  essential?
+{query}
+5.    SOURCE  PREDICTION  -  What  types  of  documents  would  contain  this  information?17
+
+Relevant  passages:
+After  your  detailed  reasoning,  provide  a  comprehensive  hypothetical  document
+{passages}
+that  directly  and  thoroughly  answers  the  question  with  extensive  background  and
+context.
+Write  an  improved  query  that  incorporates  key  information  from  the  passages:
+</instructions>
+
+========== PDF PAGE 18 / 24 ==========
+          •  Facet: Generates multiple facets or aspects of the query topic using an LLM. Each facet retrieves different relevant
+             content, improving recall for broad or ambiguous topics.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Decomposition: Query Breakdown
+Facet: Multi-Aspect Query Generation
+<task>
+You  are  an  expert  at  analyzing  complex  questions  and  breaking  them  down  into<task>
+You  are  an  expert  at  semantic  facet  analysis  for  information  retrieval.    Your  taskcomprehensive,  well-researched  sub-queries.
+is  to  identify  multiple  semantic  dimensions  of  a  query  and  generate  comprehensive</task>
+keyword  expansions  for  each  facet.
+</task><query>
+{query}
+<query></query>
+{query}
+</query><instructions>
+First,  analyze  the  question  thoroughly  in  a  <think>  section:
+<instructions>
+1.    COMPLEXITY  ANALYSIS  -  What  makes  this  question  complex?First,  analyze  the  query  thoroughly  in  a  <think>  section:
+2.    CONCEPT  MAPPING  -  What  are  the  main  concepts  involved?
+1.    SEMANTIC  STRUCTURE  ANALYSIS  -  What  are  the  distinct  semantic  dimensions?3.    INFORMATION  NEED  BREAKDOWN  -  What  distinct  pieces  of  information  are  needed?•  Contrastive: Generatescontrastivedescriptionsthathighlight whattheuser isNOTlookingfor. Usesnegative examples
+4.    SUB-QUERY  STRATEGY  -  How  should  the  query  be  split  to  maximize  coverage?2.    FACET  IDENTIFICATION  -  What  are  the  main  conceptual  facets?to help distinguish between similar but different concepts during retrieval.
+3.    TERMINOLOGY  MAPPING  PER  FACET  -  For  each  facet,  what  are  the  key  terms?5.    RETRIEVAL  OPTIMIZATION  -  How  can  each  sub-query  be  phrased  for  optimal
+4.    RETRIEVAL  STRATEGY  -  How  can  facet-specific  terms  improve  retrieval  diversity?matching?18
+5.    COVERAGE  OPTIMIZATION  -  Are  there  gaps  in  facet  coverage?
+After  your  detailed  reasoning,  provide  at  least  5  comprehensive  sub-queries
+After  your  detailed  reasoning,  provide  at  least  6  clearly  defined  semantic  facetsthat  are  detailed,  self-contained,  and  cover  different  aspects  of  the  original
+with  10-15  relevant  keywords  each.question.
+</instructions></instructions>
+
+========== PDF PAGE 19 / 24 ==========
+          •  Custom-Rewriter: LLM-basedqueryrewriterthatcomprehensivelyrewritesandexpandsquerieswithdetailedreasoning
+             to maximize retrieval effectiveness.
+
+
+
+
+
+
+
+
+
+
+
+Contrastive: Positive/Negative Term Generation
+
+<task>
+You  are  an  expert  at  contrastive  query  expansion  for  precision-focused  information
+Custom-Rewriter: Comprehensive Query Rewriting
+retrieval.    Your  task  is  to  generate  comprehensive  positive  and  negative  expansion
+terms.
+<task></task>
+You  are  an  expert  query  rewriter  for  information  retrieval  systems.    Your  task  is
+<query>to  comprehensively  rewrite  and  expand  the  following  query  to  maximize  retrieval
+effectiveness.{query}
+</task></query>
+
+<instructions><query>
+First,  analyze  the  query  thoroughly  in  a  <think>  section:{query}
+</query>
+1.    INTENT  ANALYSIS  -  What  would  constitute  a  relevant/irrelevant  document?Neural Rewriting Methods.
+2.    POSITIVE  TERM  STRATEGY  -  What  terms  MUST  appear  in  relevant  documents?<instructions>
+3.    NEGATIVE  TERM  STRATEGY  -  What  terms  indicate  a  document  is  OFF-topic?First,  analyze  the  query  thoroughly  in  a  <think>  section:•  BGE-Rewriter:  Uses the BGE instruction-following capability to rewrite queries in a retrieval-optimized format.
+4.    DISAMBIGUATION  ANALYSIS  -  Are  there  multiple  interpretations?
+1.    UNDERSTANDING  THE  QUERY  -  What  is  the  user  really  asking  for?5.    PRECISION  OPTIMIZATION  -  How  can  we  maximize  precision  without  sacrificingTransforms natural language questions into search-friendly statements without requiring LLM inference.
+2.    DOMAIN  ANALYSIS  -  What  field/domain  does  this  query  belong  to?recall?•  Turbo-Rewriter: FastqueryrewritingusingGPT-3.5-Turbowithminimalprompting. Balancesqualityandlatencyfor
+3.    DOCUMENT  PREDICTION  -  What  types  of  documents  would  answer  this  query?
+After  your  detailed  reasoning,  provide:4.    EXPANSION  STRATEGY  -  What  related  concepts  should  be  included?19
+5.    REWRITING  APPROACH  -  How  can  the  query  be  made  more  precise?POSITIVE  EXPANSION  (30+  terms):    Core  concepts,  technical  vocabulary,  related
+processes
+After  your  detailed  reasoning,  provide  a  comprehensive  rewritten  query  thatNEGATIVE  EXPANSION  (20+  terms):    Off-topic  terms,  wrong  domain  indicators,
+misleading  homonymsincludes  extensive  background  context  and  uses  precise  technical  terminology.
+</instructions></instructions>
+
+========== PDF PAGE 20 / 24 ==========
+                     Table 4.Naive retrieval: best retriever and index per dataset (393 experiments, no query expansion).
+
+              Dataset             Retriever        Index     NDCG@1  NDCG@5  NDCG@10  Recall@5  Recall@10  MRR
+                                                                        BEIR Datasets
+              NFCorpus         BGE-base      abstract        0.288           0.155            0.125           0.026           0.031       0.351
+              SciDocs             GTE-base         none          0.466           0.251            0.191           0.110           0.148       0.532
+                                                              BRIGHT - StackExchange Q&A
+              Biology             GTE-base         title           0.971           0.598            0.597           0.491           0.500       0.979
+              Earth Sci.          GTE-base         title           0.767           0.510            0.516           0.439           0.465       0.826
+              Economics        GTE-base         title           0.641           0.431            0.440           0.381           0.402       0.695
+              Psychology       GTE-base         title           0.535           0.351            0.382           0.304           0.351       0.585
+              Robotics            BGE-M3           title           0.455           0.350            0.361           0.342           0.369       0.543
+              StackOvflw       GTE-base      abstract        0.581           0.399            0.411           0.365           0.393       0.645
+              Sust. Living      GTE-base         title           0.750           0.500            0.511           0.430           0.465       0.808
+                                                                 BRIGHT - Coding & Math
+              LeetCode           BGE-large    keywords      0.183           0.214            0.215           0.204           0.239       0.348
+              Pony                  DistilBERT      none          0.893           0.559            0.450           0.202           0.286       0.925
+              AoPS                 GTE-base     keywords      0.027           0.139            0.177           0.107           0.185       0.235
+              TheoremQA-T  MiniLM         abstract        0.342           0.272            0.324           0.225           0.336       0.462
+
+  production settings where full LLM generation is too slow.
+
+Classical IR Methods.
+
+•  Synonyms:  Expands queries with WordNet synonyms and related terms.  A classical IR technique that addresses
+  vocabulary mismatch without neural generation.
+•  PRF(Pseudo-RelevanceFeedback): Usestermsfromtop-kinitiallyretrieveddocumentstoexpandthequery. Assumes
+  top results are relevant and extracts discriminative terms.
+
+B.5. Naive Retrieval Analysis
+Thissectionprovidesdetailedanalysisofnaiveretrievalexperiments,whichevaluatedifferentdenseretrieversanddocument
+indexing strategies without queryexpansion or dynamickey evolution. These results establishthe foundation for comparing
+our ERM approach. For detailed descriptions of each retriever and index method, seeSectionB.2andSectionB.3.
+
+B.6. Experimental Setup
+We evaluated 7 dense retrievers across 13 datasets with 4 index methods, totaling 393 naive retrieval experiments. See
+SectionB.2for retriever details andSectionB.3for index method descriptions.
+
+B.7. Best Configuration per Dataset
+Table4presents the best retriever and index configuration for each dataset.
+
+GTE-baseasthedominantretriever.  GTE-baseachievesthebestperformanceon8outof13datasets,spanningboth
+StackExchange Q&A and BEIR domains. This dominance likely stems from GTE’s contrastive pre-training on large-scale
+text pairs, which produces embeddings well-suited for semantic matching across diverse domains. The remaining datasets
+whereGTEdoes notwin,suchasRobotics(BGE-M3), NFCorpus(BGE-base),LeetCode(BGE-large),Pony(DistilBERT),
+andTheoremQA-T(MiniLM),tendtoinvolveeitherhighlyspecializedvocabulariesordocumentstructuresthatdeviate
+fromstandardprose,suggestingthatdomain-specificembeddingpropertiescanstilloutweighgeneral-purposerepresentation
+quality.
+
+Title indexing preferred for Q&A domains.StackExchange datasets consistently achieve their best retrieval scores with
+title-basedindexing,yielding15–40%absoluteimprovementinNDCG@10overfull-documentindexing. Thisisbecause
+
+                                                                                20
+
+========== PDF PAGE 21 / 24 ==========
+Figure 5.Index method comparison using GTE-base retriever across all datasets. Title indexing dominates for StackExchange Q&A
+domains,whileabstract/keywordsworkbetterfortechnicalandmathematicalcontent. TheconsistentadvantageoftitleindexingforQ&A
+suggests that concise document representations reduce noise in dense retrieval.
+
+StackExchangetitlesareconcise,information-densesummariesthatcloselymirrorthequeryintent,whilefulldocument
+bodiesintroducesubstantialnoisefromdiscussionthreads,tangentialcomments,andcodesnippets. Theeffectivenessof
+title indexing for Q&A content highlights a broader principle: when the query-document matching problem can be reduced
+to matching against a compact, high-signal representation, dense retrievers benefit from reduced embedding dilution.
+
+Domain-specificindexingpatterns.CodingandmathdatasetsexhibitdifferentindexingpreferencesfromQ&Adomains.
+LeetCodeandAoPSperformbestwithkeywordindexing,whereextractedkeywordscapturethealgorithmicconceptsand
+mathematical termsessential for matching. In contrast, BEIRdatasets show mixed preferences: NFCorpus favors abstract
+indexing (capturing medical summaries), while SciDocs works best with no indexing preprocessing. These patterns suggest
+thattheoptimalindexingstrategydependsonthestructuralrelationshipbetweenqueriesanddocuments: whenqueriesand
+documents shareexplicit technicalvocabulary,keywordextraction iseffective, whiletopical but not lexicaloverlapcalls for
+richer representations.
+
+B.8. Index Method Comparison
+Figure5showstheimpactofdifferentdocumentindexingstrategiesusingthemost-winningretriever(GTE-base)acrossall
+datasets, providing a controlled comparison that isolates the effect of document representation from retriever choice.
+
+Title indexingexcels forStackExchange.Biology, EarthScience, Economics,Psychology, andSustainable Livingall
+achieve their highest NDCG@10 with title-only indexing, often by significant margins of 0.1–0.2 absolute improvement.
+This consistent advantage arises because StackExchange question titles are carefully crafted by users to summarize their
+information need, creating a natural alignment between query semantics and title embeddings. When full document bodies
+are included, the embedding is diluted by answer text that may discuss tangential aspects or contain formatting artifacts,
+reducing retrieval precision.
+
+Abstractindexingfortechnicalcontent.StackOverflowandNFCorpusperformbetterwithabstractindexing,suggesting
+that code-heavy or technical content benefits from richer contextual representations. For StackOverflow, where answers
+often contain code blocks alongside explanatory text, abstract-level indexing captures the semantic intent behind code
+solutions. Similarly, NFCorpus medical documents require sufficient context to disambiguate specialized terminology.
+This finding implies that the optimaldocument representation granularity dependson the semantic densityof the content:
+sparse, focused documents benefit from compression (titles), while dense, multi-faceted documents benefit from moderate
+expansion (abstracts).
+
+Keywords for mathematical domains.AoPS achieves its best results with keyword indexing, indicating that theorem-
+based retrieval benefits from explicit keyword extraction. Mathematical queries often reference specific theorem names,
+problem types, or algebraic structures that serve as strong retrieval signals when isolated from surrounding prose. This
+aligns with the observation that mathematical reasoning tasks require identifying precise conceptual anchors rather than
+
+                                                                       21
+
+========== PDF PAGE 22 / 24 ==========
+broad topical similarity.
+
+NDCG@1>   NDCG@5 pattern.A counterintuitive pattern appears across most BRIGHT datasets where NDCG@1
+exceeds NDCG@5. This occurs because BRIGHT datasets typically have a small number of relevant documents per query
+(avg.3.6forBiology),sotheidealDCGgainatcutoff5or10cannotbefullyrealized. HighNDCG@1indicatesstrong
+top-1 precision, while the lower NDCG@5/10 reflects the structural ceiling imposed by having fewer ground-truth relevant
+documentsthanthecutoffdepth. Thismetricbehaviorisimportanttoconsiderwheninterpretingretrievalimprovements:
+gains in NDCG@10 are harder to achieve and thus more meaningful for these datasets.
+
+B.9. Query Expansion Analysis
+
+                                                               Robustnesstodifferentqueryexpansionmethods.Asshown
+                                                               inFigure6, ERM provides consistent improvements over naive
+                                                               retrieval across all combinations of query expansion methods
+                                                               and retrievers on the LeetCode dataset.   The bubble sizes and
+                                                               colors indicate the percentage gain achieved by ERM, ranging
+                                                               from+12%(FacetwithBM25)to+58%(HyDEwithBGE-Large).
+                                                               Denseretrievers(BGE-Large,GTE-Base) showthe highestgains
+                                                               (+40–58%), while HyDE and Diver query expansion methods
+                                                               consistently outperform other QE approaches.
+
+                                                               Table5presents the best query expansion configuration for each
+                                                               dataset. Wecompareagainstthenaiveretrievalbaseline(noQE)to
+                                                               measure the impact of different QE methods. QE provides value
+Figure6.ERMgainsacrossqueryexpansionmethods                    even when the original queries are already well-formed natural
+and retrievers on LeetCode.                                    languagequestions. Thisindicatesthatthekeyevolutionarymecha-
+                                                               nismsofERMandqueryexpansiontechniquesarecomplementary,
+                                                               not redundant.
+
+HyDE and Diver as complementary strategies.HyDE dominates on BEIR and technical content (NFCorpus, SciDocs,
+Psychology,StackOverflow,LeetCode),whileDiverexcelsonStackExchangeQ&Adatasets(EarthScience,Economics,
+Robotics,SustainableLiving). Thiscomplementarityarisesfromtheirdifferentexpansionmechanisms: HyDEgeneratesa
+hypothetical relevant document and embeds it, which is particularly effective when the retrieval gap stems from modality
+differences between queries and documents (e.g., problem statements vs. code solutions). Diver, by contrast, generates
+diverse query reformulations that cover different aspects of the information need, which is beneficial for Q&A domains
+where relevant documents may address the question from multiple angles.
+
+Retriever-QEsynergy.   GTEremainsthemosteffectiveretrieverevenwithqueryexpansionactive,buttheadditionofQE
+enablesBGEvariantsandMiniLMtobecomecompetitiveonspecificdomains. Notably,MiniLMwithHyDEachievesthe
+bestresultonLeetCodedespitebeingasmallermodel,suggestingthatQEcancompensateforlimitedmodelcapacityby
+transformingqueriesintoarepresentationspacewheretheretrieverismoreeffective. Thisfindinghaspracticalimplications:
+smaller,fasterretrieverspairedwithQEmayachievecomparableperformancetolargerretrieverswithoutQE,offeringa
+favorable compute-accuracy trade-off.
+
+Minorregressionsonwell-structuredcontent.Biology(     −0.7%         ),SustainableLiving(−0.5%         ),andPony(−0.4%         )show
+slightperformancedropswithQE.Thesedatasetsshareacommonproperty: theirqueriesanddocumentsalreadyexhibit
+strong lexical and semantic alignment, so the additional expansion introduces noise rather than useful signal. For Biology
+andSustainableLiving,thetitle-indexeddocumentsalreadyprovidenear-perfecttop-1precision(NDCG@1of0.971and
+0.750respectively),leavinglittleroomforimprovementandmakingevensmallnoiseinjectionsharmful. Thismotivates
+ERM’s selective evolution approach, which conditions updates on verified retrieval improvements rather than applying
+expansion uniformly.
+
+Distribution Analysis.Beyond comparing only the best configurations, we analyze the full distribution of NDCG@1
+scores across all retriever–index–QE combinations to understand how query expansion affects retrieval robustness more
+
+                                                                   22
+
+========== PDF PAGE 23 / 24 ==========
+Table 5.Query expansion results: bestQE configurationper dataset(ERM=False).  ∆ (%) showspercentage improvement inNDCG@1 vs
+naive retrieval baseline.
+
+     Dataset            QE Method       Retriever Index       NDCG@1 NDCG@5 NDCG@10 Recall@10 MRR                                        ∆  NDCG@1(%)
+                                                                      BEIR Datasets
+     NFCorpus         hyde                   BGE-B     abstract        0.293          0.152           0.129           0.036      0.346       +2.1%
+     SciDocs            hyde                   GTE          none             0.522          0.267           0.202           0.154      0.566+12.2%
+                                                            BRIGHT - StackExchange Q&A
+     Biology            diver                   GTE          title               0.964          0.595           0.594           0.500      0.974-0.7%
+     Earth Sci.         diver                   GTE          title               0.828          0.540           0.545           0.484      0.874+8.0%
+     Economics       diver                   GTE          title               0.651          0.433           0.443           0.407      0.698+1.6%
+     Psychology       hyde                   GTE          title               0.654          0.420           0.443           0.381      0.689+22.4%
+     Robotics           diver                   BGE-M    title               0.469          0.358           0.363           0.361      0.551 +3.1%
+     StackOvflw      hyde                   GTE          keywords      0.617          0.406           0.420           0.391      0.666       +6.2%
+     Sust. Living      diver                   BGE-L      title               0.770          0.502           0.505           0.447      0.815+2.7%
+                                                               BRIGHT - Coding & Math
+     LeetCode          hyde                   Mini          keywords      0.263          0.252           0.255           0.287      0.407   +43.7%
+     Pony                 custom  rewriter Dist           none             0.889          0.559           0.448           0.287      0.923   -0.4%
+     AoPS                decomposition   BGE-L      keywords      0.227          0.201           0.230           0.225      0.356          +740.7%
+     TheoremQA-T bge         rewriter       GTE          abstract        0.672          0.491           0.529           0.474      0.767    +96.5%
+
+broadly.Figure7visualizes these distributions as grouped box plots, comparing naive retrieval against query expansion for
+eachdataset. Thisdistributionalviewcomplementstheper-datasetbest-configurationanalysisinTable5byrevealingnot
+only whether the best case improves, but also how the typical case and worst case are affected.
+
+Consistent improvement on reasoning-intensive datasets.Biology, Earth Science, Psychology, and AoPS show clear
+upwardshiftsinmedianNDCG@1withqueryexpansion. ThemostdramaticimprovementappearsonAoPS,wherethe
+median rises from 0.027 to 0.067, a 148% relative gain. This disproportionate benefit for reasoning-intensive datasets
+is expected: when the semantic gap between queries and documents is large (as in mathematical problem-to-theorem
+matching),queryexpansionprovidestheintermediaterepresentationsneededtobridgethatgap. Theconsistentdirectionof
+improvement across these datasets, despite using different optimal QE methods, confirms that the benefit of expansion is a
+general phenomenon rather than an artifact of a specific technique.
+
+Reducedvariancewithqueryexpansion.Severaldatasets(Biology,EarthScience,Psychology)exhibittighterNDCG@1
+distributionswithQE,asevidencedbyshorterinterquartileranges. ThisvariancereductionindicatesthatQEmakesretrieval
+performancemore robusttothe choiceofretriever andindexmethod. In practicalterms,this means thatpractitionerscan
+achieve more predictable performance with QE even without extensive hyperparameter tuning of the retrieval pipeline,
+which is an important property for deployment in new domains where the optimal retriever-index combination is unknown a
+priori.
+
+Mixed results on BEIR datasets.NFCorpus and SciDocs show minimal distributional shift between naive and QE-
+augmentedretrieval. TheseBEIRdatasetsweredesignedforstandardinformationretrievalevaluationwherequeriesand
+documents share substantial lexical overlap, unlike BRIGHT’s reasoning-intensive tasks. The limited benefit of QE on
+BEIRsuggeststhatqueryexpansionismostvaluablewhenthereisafundamentalrepresentationgapbetweenqueriesand
+documents, rather than when the challenge is merely discriminating among lexically similar candidates.
+
+Higher performance ceiling with QE.The upper whiskers for most datasets extend higher with query expansion,
+indicatingthatthebestQEconfigurationsoutperformthebestnaiveretrievalconfigurations. Thisissignificantbecauseit
+showsthat QE doesnot merely raise thefloor of performance but also pushesthe ceiling, creating new opportunities for
+methods like ERM to build upon. The gap between the QE ceiling and the QE median also suggests room for adaptive
+selection of QE strategies, precisely the kind of optimization that ERM’s key evolution mechanism can exploit.
+
+
+
+
+                                                                             23
+
+========== PDF PAGE 24 / 24 ==========
+Figure 7.Grouped box plot comparing NDCG@1 distributions between naive retrieval and query expansion across all datasets. Each
+boxsummarizesallretrieverandindexconfigurationstested. Queryexpansiongenerallyimprovesmedianperformanceandraisesthe
+performanceceiling, particularlyfor complex reasoning datasetslike AoPS(+148% medianimprovement) and Biology (+14%median
+improvement).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                          24

@@ -1,0 +1,773 @@
+
+
+========== PDF PAGE 1 / 12 ==========
+ BeyondSemanticRelevance:CounterfactualRiskMinimization
+                        forRobustRetrieval-AugmentedGeneration
+                  Peiyang Liu                                         Qiang Yan                                         Ziqiang Cui
+        National Engineering Research                                 PX Securities                           City University of Hong Kong
+      Center for Software Engineering,                              Shenzhen, China                               Hong Kong SAR, China
+                Peking University                                     yq@pxsec.cn                              ziqiang.cui@my.cityu.edu.hk
+                  Beijing, China
+            liupeiyang@pku.edu.cn
+                     Di Liang                                          Xi Wang                                             Wei Ye∗
+              Tencent Technology                                   Peking University                          National Engineering Research
+                  Beijing, China                                     Beijing, China                         Center for Software Engineering,
+            liangd17@fudan.edu.cn                             wangxi5629@pku.edu.cn                                   Peking University
+                                                                                                                        Beijing, China
+                                                                                                                      wye@pku.edu.cn
+Abstract                                                                          ACMReferenceFormat:
+Standard Retrieval-AugmentedGeneration (RAG) systemspredom-                       PeiyangLiu,QiangYan,ZiqiangCui,DiLiang,XiWang,andWeiYe.2026.
+inantly rely on semantic relevance as a proxy for utility. How-                   Beyond Semantic Relevance: Counterfactual Risk Minimization for Robust
+ever, this assumption collapses in realistic decision-making sce-                 Retrieval-Augmented Generation. InProceedings of the 49th International
+narios where user queries are laden with cognitive biases, such                   ACMSIGIRConferenceonResearchandDevelopmentinInformationRetrieval
+                                                                                  (SIGIR’26),July20–24,2026,Melbourne,VIC,Australia.ACM,NewYork,NY,
+as false premises or confirmation bias. In such cases, maximiz-                   USA, 12 pages. https://doi.org/10.1145/3805712.3809631
+ingrelevanceparadoxicallypromotestheretrievalofsycophantic
+evidence that reinforces hallucinations, a critical failure we term               1   Introduction
+the “Relevance-Robustness Gap”. To bridge this gap, we propose
+CoRM-RAG(CounterfactualRiskMinimizationforRAG),aframe-                            Large LanguageModels (LLMs)have become indispensablecogni-
+work that aligns retrieval with decision safety rather than mere                  tive prosthetics, assisting humans in tasks ranging from creative
+similarity.Groundedincausalintervention,weintroducea Cogni-                       writingto complexdecision-makinginhigh-stakesdomains such
+tive Perturbation Protocol to simulate user biases during training,               as healthcare, law, and finance [5, 15, 21, 25, 33, 34, 36, 41, 44, 54,
+whichisthendistilledintoalightweightEvidenceCritic.Thisscor-                      63, 68, 79, 81]. Despite their fluency, LLMs suffer from a funda-
+ing module learns to identify documents that possess sufficient                   mental limitation: they are prone tohallucinations, confidently
+evidentialstrengthtosteerthemodeltowardcorrectnessdespite                         generating factually incorrect assertions [3, 24]. To mitigate this,
+adversarialqueryperturbations.Extensiveexperimentsondecision-                     Retrieval-Augmented Generation(RAG)[30– 32, 80] hasemerged
+making benchmarks demonstrate that CoRM-RAG significantly                         as the de facto standard, grounding model outputs in external,
+outperformsstrongdense retrievers andLLM-based rerankersin                        verifiable knowledge bases. By retrieving documents relevant to
+adversarial settings, while enabling effective risk-aware absten-                 the user’s query, RAG significantly enhances factual accuracy and
+tionthroughreliablerobustnessscoring.Ourcodeisavailableat                         interpretability [39, 40, 56, 78].
+https://github.com/PeiYangLiu/CoRM-RAG.git.                                          However,currentRAGparadigmspredominantlyrelyonseman-
+                                                                                  tic relevanceas the sole criterion for retrieval [        59]. The underlying
+CCSConcepts                                                                       assumption is that if a document is semantically similar to the
+•Information systems→ Question answering;Language                                 query,itisusefulforthedecision[28,64].Thisassumptionholdsin
+models.                                                                           benignsettingsbutoftendegradessignificantlyinrealisticdecision-
+                                                                                  making scenarios where the user, and consequently their query, is
+Keywords                                                                          notaneutralobserverbutabiasedagent.Humandecision-makers
+Retrieval-Augmented Generation, Robustness, Uncertainty Estima-                   are plagued by cognitive biases, such asconfirmation bias(seeking
+tion                                                                              information that validates pre-existing beliefs) andanchoring bias
+                                                                                  (relying heavily on the first piece of information offered) [55].
+∗Corresponding Author                                                                Considerauserwhoincorrectlybelievesthat“Sharkcartilage
+                                                                                  curescancer”andqueriesanLLM:“How does shark cartilage stop
+                                                                                  tumors?”Astandardsemanticretriever,optimizingforvectorsimi-
+ThisworkislicensedunderaCreativeCommonsAttribution4.0InternationalLicense.        larity [46, 51], will likely fetch documents discussing shark carti-
+SIGIR ’26, Melbourne, VIC, Australia                                              lageandtumors,potentiallyincludingpseudoscientificarticlesor
+©2026 Copyright held by the owner/author(s).                                      anecdotalblogpoststhatsemanticallymatchtheuser’smisguided
+ACM ISBN 979-8-4007-2599-9/2026/07
+https://doi.org/10.1145/3805712.3809631                                           premise. The LLM, conditioned on this “relevant” context, may
+
+========== PDF PAGE 2 / 12 ==========
+SIGIR ’26, July 20–24, 2026, Melbourne, VIC, Australia                                                                                                                                                                             Peiyang Liu et al.
+
+                                                                                           •We identify the “Relevance-Robustness Gap” in standard
+                                                                                              RAGsystems, showingthat semantic relevanceoften corre-
+                                                                                              lates poorly with decision reliability under user bias.
+                                                                                           •WeintroducetheCoRM-RAGframework,whichleveragesa
+                                                                                              CognitivePerturbationProtocoltosimulateconfirmationbias
+                                                                                              and false premises, training a system to minimize decision
+                                                                                              risk under these interventions.
+                                                                                           •WeproposetheEvidenceCritic,anefficientscoringmod-
+                                                                                              ule trained via teacher-student distillation, which enables
+                                                                                              robustretrievalwithnegligible inference latencycompared
+                                                                                              to generative reranking methods.
+                                                                                           •Extensiveexperimentsondecision-makingbenchmarksdemon-
+                                                                                              stratethatCoRM-RAGsignificantlyoutperformsstrongbase-
+Figure1:TheRelevance-RobustnessGap.Left:StandardRAG                                           linesinbothaccuracyandrisk-awareabstention,particularly
+retrievesdocumentsbasedonsemanticsimilarity.Whenthe                                           in scenarios involving misleading or ambiguous queries.
+user query contains a false premise, the retriever fetches
+sycophanticevidencethatreinforcesthebias,leadingtohal-                                2   RelatedWork
+lucinations.Right:CoRM-RAGemploysanEvidenceCriticto                                   Our work sits at the intersection of robust retrieval-augmented
+assesscounterfactualutility,filteringoutconfirmingnoise                               generation, the mitigation of cognitive biases in LLMs, and risk-
+and retrievingrobust evidencethat empowers the LLM to                                 aware ranking.
+correcttheuser’smisconception.
+                                                                                         RobustnessinRetrieval-AugmentedGeneration.Retrieval-Augmented
+                                                                                      Generation (RAG) has become the standard for grounding LLMs
+                                                                                      in external knowledge [22, 30, 69, 71], with dense retrievers like
+succumb tosycophancy[                  19, 27, 60], the tendency to agree with        Contriever [23] replacingsparse methodsto capture semanticin-
+the user’s view, and generate a hallucinated confirmation of the                      tent [47, 48, 61, 73, 77]. However, the reliability of RAG heavily
+cure[62,70].Inthiscase,maximizingrelevanceparadoxicallymin-                           depends on the quality of retrieved contexts [45]. Recent studies
+imizesreliability.Thecriticalfailureisnotalackofknowledge,but                         highlightthatLLMsareeasilydistractedbyirrelevantnoise[43,50,
+a lack ofrobustnessagainst the user’s cognitive noise [                  10, 65], as  75, 76] or can be misled by conflicting information [9, 11]. While
+illustrated in Figure 1.                                                              previous approaches focus on filtering out irrelevant documents or
+   Inthiswork,wearguethatforreliabledecision-making,retrieval                         training models to ignore noise [12], they predominantly assume
+must optimizeforCounterfactualRobustnessratherthan mere                               a neutral user intent. Our work addresses a more insidious failure
+relevance.Wedefinearobustdocumentnotasonethatmatchesthe                               mode:adversarial relevance, where retrieved documents are seman-
+query words,but asone that containssufficient evidentialstrength                      tically relevant to a user’s biased query but factually misleading,
+to steer the LLM towards the correct decision,even ifthe user’s                       acting as an echo chamber for hallucinations.
+
+queryisperturbedbybiases,misconceptions,oradversarialnoise.                              SycophancyandCognitiveBiasinLLMs.LLMsexhibitatendency
+   To operationalize this insight, we proposeCoRM-RAG(Coun-                           towardssycophancy, agreeing with users’ mistaken premises to op-
+terfactual Risk Minimization for RAG), a novel framework that                         timize for perceived helpfulness over truthfulness [7, 58, 62, 70].
+aligns retrieval with decision safety, as illustrated in Figure 2. Our                Benchmarks like TruthfulQA [42] demonstrate that models often
+approach is grounded in the principle ofCognitive Perturbation:                       mimichumanmisconceptions(e.g.,superstitions)whenprompted.
+during training, we simulate various user biases (e.g., injecting                     While reinforcement learning (RLHF) has been proposed to align
+falsepremises ormisleading contexts)to stress-testcandidate doc-                      modelswithfactualintegrity[13,16– 18,20,35,57],theseinterven-
+uments.WeobservewhichdocumentsenabletheLLMtomaintain                                  tions often degrade after fine-tuning on diverse user instructions.
+thecorrectdecisiondespitetheseperturbations.Thiscounterfactual                        Furthermore,Thakur and Vashisth [67] showthat retrievalcan in-
+supervision is then distilled into a lightweightEvidence Critic,                      advertentlyexacerbatethisissueiftheretrieveroptimizessolelyfor
+ascoringmodelthatlearnstopredict the“robustnessutility”ofa                            semanticsimilaritywithabiasedquery.CoRM-RAGdiffersfrom
+document-query pair.                                                                  thesealignment-centricapproachesbyshiftingtheburdenofsafety
+   Duringinference,CoRM-RAGfunctionsasarisk-awarereranker.                            totheretrievalstage,ensuringthattheevidencefedtotheLLMis
+Itevaluatesretrievedcandidatesnotbyhowmuchtheyresemblethe                             robust enough to counteract, rather than confirm, user biases.
+query,butbytheirpredictedcapacitytowithstandcognitiveerrors.
+Furthermore, by thresholding the Critic’s confidence scores, our                         Risk-Aware Retrieval and Causal Inference.Toimprovedecision
+systemcan estimatedecisionreliability.This enablesaRisk-Aware                         reliability, recent frameworks incorporate self-reflection or risk
+Abstentionmechanism:ifnoretrieveddocumentofferssufficientro-                          assessment into the generation process. Self-RAG [4] introduces
+bustnessguarantees(e.g.,exceedingasafetythreshold),thesystem                          critic tokens to evaluate retrieval quality on-the-fly, while Cali-
+refuses to answer rather than risking a biased hallucination.                         bRAG [6]focusesoncalibrating modelconfidence.However,these
+   Our contributions are summarized as follows:                                       methods typically incur high inference latency due to multiple
+
+========== PDF PAGE 3 / 12 ==========
+Beyond Semantic Relevance: Counterfactual Risk Minimization for Robust Retrieval-Augmented Generation                      SIGIR ’26, July 20–24, 2026, Melbourne, VIC, Australia
+
+LLM calls. From a theoretical perspective, our work draws in-                        where⊕denotes the injection of the perturbation into the context,
+spiration from counterfactual learning to rank (CLTR) [26] and                       and I(·)is the indicator function. Our goal is to retrieve𝑑∗that
+robust sequence modeling in ranking and recommendation sys-                          maximizes this utility:
+tems [2, 14, 37, 38, 52, 53, 72, 74], which aims to debias click logs.                                      𝑑∗robust =argmax 𝑑∈D𝑈(𝑑,𝑥)                       (3)
+Unlike traditional CLTR which corrects for position bias, CoRM-
+RAG applies causal interventions to thequeryitself [       1], treating              Thisformulationshifts theretrievalgoalfrom “findingmatching
+user bias as a confounding variable. By explicitly modeling the                      words” to “finding evidence strong enough to withstand bias”.
+“robustness utility” under perturbation, we propose a distillation                   3.2   TheCognitivePerturbationProtocol
+approachthat matchesthesafety ofheavyreasoning modelswith
+the efficiency of standard rerankers.                                                Estimating the expectation in Eq. (2) requires a rigorous definition
+                                                                                     oftheperturbationspaceP(𝛿).Wecategorizecognitiveerrorsinto
+3   Methodology                                                                      threedistinctclassesanddesignautomaticprocedurestosimulate
+In this section, we presentCoRM-RAG(Counterfactual Risk Min-                         them.Crucially,everyperturbationisrealizedasasingle naturally
+imization for Retrieval Augmented Generation). Our framework                         phrased English utteranceproducedbyan AdversaryLLM(Qwen3-
+departsfromtraditionalRAGapproachesthatoptimizeforsemantic                           32Bfortraining;GPT-4oforthetestset),sothattheresultingquery
+relevance𝑃(𝑑|𝑥)     . Instead, we posit that in high-stakes decision-                is indistinguishable from how a real biased user would actually
+making, the primary objective isrobustness: the system must re-                      speak, ratherthan a templated tag-injection.The Adversary iscon-
+trieveevidence thatremainssufficient foracorrect decision,even                       strainedto(i)preservetheoriginalinformationneed(theperturbed
+when the decision-maker (user or agent) is subject to cognitive                      querymuststilladmitthesamegoldanswer𝑦),(ii)preservethewh-
+biases, misconceptions, or adversarial noise.                                        wordandsubjectofthequestion, and(iii)avoidtell-talehedging
+   We firstformalize thedecision-making problem undera causal                        vocabulary (e.g., “actually”, “inreality”, “despite”) so that the false
+lens. We then introduce ourCognitive Perturbation Protocol, which                    contentispresentedasasincerebackgroundbeliefratherthana
+simulatesuserbiases.Subsequently,wedescribethetrainingofthe                          flagged caveat.
+EvidenceCritic,a specializedscoringmodel trainedtopredictde-                         3.2.1   TypeI:False-PremiseRewriting.Theaskerholdsanincorrect
+cisionrobustness.Finally,wedetailtheinferenceprocedure,which                         factualbeliefaboutanentityrelatedtothequestion.TheAdversary
+includes a risk-aware abstention mechanism.                                          samples a wrong-belief entity𝑦′≠𝑦   from a typed entity pool of
+                                                                                     othergoldanswersinNQ,andrewrites𝑥intoasingleinterrogative
+3.1   ProblemFormulation:FromRelevanceto                                             sentenceinwhich𝑦′appearsasapresuppositionratherthanasthe
+        CausalRobustness                                                             new subject of the question.
+Let𝑥∈Xdenote a user query (or decision task) and𝑦∈Ydenote                                 •Example:If      𝑥=    “Who painted the Mona Lisa?” (gold𝑦=
+the ground-truth optimal decision. We assume access to a retrieval                           Leonardo da Vinci)and   𝑦′=  Michelangelo,therewriteis“In
+corpusD={𝑑         1,...,𝑑𝑁}.AgeneratormodelM (e.g.,anLLM)pro-                               Michelangelo’s portrait that we call the Mona Lisa, who did
+ducesadecision ˆ𝑦=M(𝑥,𝑑)    conditionedonaretrieveddocument                                  thepainting?”.Thewh-wordandgoldanswerarepreserved;
+𝑑.                                                                                           the wrong belief is woven in as a background assumption.
+   The Failure of Standard RAG.Standard RAG optimizes retrieval                      3.2.2   TypeII:Confirmation-BiasRewriting.Theaskerholdsafalse
+bymaximizingthelikelihoodof thedocumentgiventhequery,or                              historical,temporal,quantitative,orrelationalclaimaboutthetopic
+the likelihood of the answer given the document:                                     of𝑥, and asks the question from inside that mistaken worldview.
+                                                                                     TheAdversaryrewrites𝑥intoasingle interrogativesentencethat
+                       𝑑∗std =argmax 𝑑∈D𝑃(𝑦|𝑥,𝑑)                       (1)           embedssuchaclaimasasincerepresupposition.Weusetwosub-
+However,thisformulationassumestheinput𝑥isaneutral,objective                          templates, one targeting historical/temporal/existential distortions,
+descriptionofthetask.Inreality,usersoftenformulatequeriesladen                       one targeting quantitative/relational/causal distortions, to broaden
+withconfirmation bias(seeking validation for anincorrect belief)                     coverage of confirmation-bias surface forms.
+ormisleadingpremises.Undersuchconditions,adocument     𝑑might                             •Example (historical):For       𝑥=    “Who is the CEO of Apple?”
+besemantically relevant(high𝑃(𝑑|𝑥)     )and even factuallycorrect,                           (gold𝑦=    Tim Cook), the rewrite is “Steve Jobs still runs
+yetfailtooverridethestrongpriorbiasembeddedin𝑥,leadingthe                                    Apple today, who’s the CEO?”.
+generatorMto hallucinate or conform to the user’s error.                                  •Example(quantitative):For 𝑥=   “HowtallisMountEverest?”,
+                                                                                             therewriteis “Astheshortest peakintheentire Himalayan
+   CounterfactualRiskMinimization.Wemodeltheuser’scognitive                                  range,howtallisMountEverest?”.Theasked-forquantity,
+state as an intervention variable𝛿. The observed query𝑥is often a                            and therefore the gold answer, is unchanged.
+perturbedversionoftheunderlyingintent𝑥∗,influencedbybias𝛿.                           3.2.3   TypeIII:TopicalDistraction.Anaturallyarisingfailuremode
+Toensurereliability,weseekadocument𝑑thatisinvarianttothese                           of RAG is that an attentive but cognitively loaded user appends
+perturbations. We define theRobustness Utility  𝑈(𝑑,𝑥)  as the                       an unrelated thought to their query. The Adversary samples a
+probabilityofmakingthecorrectdecision𝑦underadistributionof                           topic from a fixed inventory of unrelated domains (e.g. marine
+cognitive perturbationsP(𝛿):                                                         biology,classicalmusic,Norsemythology)andwritesoneplausible
+
+               𝑈(𝑑,𝑥)=E    𝛿∼P(𝛿)[I(M(𝑥⊕𝛿,𝑑)=𝑦) ]              (2)                   standalonesentenceonthattopic,appendedtotheoriginalquestion.
+
+========== PDF PAGE 4 / 12 ==========
+SIGIR ’26, July 20–24, 2026, Melbourne, VIC, Australia                                                                                                                                                                             Peiyang Liu et al.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 2: The CoRM-RAG Framework. The pipeline consists of two phases: (1) Counterfactual Training (Top): We apply a
+CognitivePerturbationProtocoltoinjectbiasesintoqueries.ATeacherLLMevaluateswhichdocumentssustaincorrectdecisions
+undertheseperturbations,generatingRobustnessScores.ThesescoressupervisethelightweightEvidenceCritic.(2)Risk-Aware
+Inference(Bottom):ThetrainedCriticscoresretrieveddocumentsbasedonpredictedrobustness.Ifthetopscoreisbelowthe
+safetythreshold𝛾,thesystemabstains;otherwise,itgeneratestheanswer.
+
+
+Thedistractorisconstrainedtobeonadifferentdomainfrom  𝑥(so                            apply our Cognitive Perturbation Protocol (Sec. 3.2) to generate
+it does not accidentally function asa hard-negative passage) and                      𝐾 distinct perturbed queries{˜𝑥(𝑘)𝑖   =𝑥𝑖⊕𝛿(𝑘)}𝐾𝑘=1   . We then issue
+not to state or imply the gold answer.                                                𝐾+ 1separateretrievalstoastandarddenseretriever(Contriever
+     •Example:For      𝑥=   “WhopaintedtheMonaLisa?”withtopic                         in ourexperiments): one withthe clean query𝑥𝑖, yieldinga top-𝑀
+        marine biology:    𝑥′=𝑥⊕    “The mantis shrimp has 16 types of                candidate setD(0)𝑖   that gives high-recallcoverage of the genuine
+        photoreceptors in its eyes.”                                                  evidence;andone with eachperturbed query ˜𝑥(𝑘)𝑖  ,yieldingD(𝑘)𝑖
+   Foreach trainingexample(𝑥,𝑦),we generatea setof𝐾 pertur-                           which by construction contains the sycophantic distractors that a
+bationsΔ𝑥={𝛿 (1),...,𝛿(𝐾)}balancedacrossthethreetypes.On                              biased query actually pulls in at deployment.
+Biased-NQ,wefollowthesamerotatedruleatevaluationtime,one                                 Each candidate document is then evaluated bythe Teacher LLM
+perturbation per query, sampled to keep the test set balanced over                    M undereveryperturbation, and we aggregate the resulting bi-
+thethreetypes,sothatreportednumbersarenotdominatedbya                                 nary outcomes into a single softrobustness score  𝑠𝑖,𝑑∈[0,1]that
+single type.                                                                          measureshowreliablythe documentsustainsthecorrect answer
+                                                                                      across the full bias spectrum:
+3.3   TheEvidenceCritic                                                                                   𝐾∑︁
+Directly computing Eq. (2) during inference is computationally                                 𝑠𝑖,𝑑=   1𝐾    I  M(˜𝑥(𝑘)𝑖 ,𝑑)=𝑦 𝑖     ∈0,  1𝐾,2𝐾,...,1	.      (4)
+prohibitive, as it requires𝐾 forward passes of the generatorM                                            𝑘=1
+for every candidate document. To address this, we propose the                         This soft label exposes a far richer training signal than a hard “ro-
+EvidenceCritic𝑓𝜃,aspecializedrankingmodeltrainedtoestimate                            bust / not robust” binary [49]. To preserve the fine-grained causal
+the robustness utility𝑈(𝑑,𝑥)in a single forward pass.                                 signal ofwhichdocument tends to resistwhichtype of bias, which
+3.3.1   Offline Teacher-StudentDistillation.We employa robustdis-                     wouldbelostifwepresentedthemodelwithasingleglobalpoolper
+tillationpipelinetotransfer thecounterfactualreasoningcapabil-                        query;weorganizetrainingintoper-perturbationlistwise groups.
+ities of the large generatorM into the efficient Evidence Critic                      For each(𝑥𝑖,𝛿(𝑘))pair we form a compact group of one positive
+𝑓𝜃.                                                                                   plus𝑁 hard negatives. The positive is sampled uniformly from the
+   Step1:CounterfactualDataGeneration.We assume access                                surviving subset of the clean retrieval,P𝑖={𝑑∈D (0)𝑖   :𝑠𝑖,𝑑>  0},
+toatrainingsetofQApairs{(𝑥𝑖,𝑦𝑖)}𝑁train𝑖=1      .Foreachquery𝑥𝑖,we                     anchoring the group on a document that genuinely supports the
+
+========== PDF PAGE 5 / 12 ==========
+Beyond Semantic Relevance: Counterfactual Risk Minimization for Robust Retrieval-Augmented Generation                      SIGIR ’26, July 20–24, 2026, Melbourne, VIC, Australia
+
+answerin atleast onebiascondition. The𝑁 negativesare sampled                           against the soft robustness target𝑠    𝑖,𝑑:
+uniformlyatrandomfromthe perturbedretrievalD(𝑘)𝑖  ,restricted                                       𝐾∑︁  ∑︁    𝑠𝑖,𝑑log(𝜎(𝑧    𝑖,𝑑,𝑘))+(1−𝑠𝑖,𝑑)log(1−𝜎(𝑧       𝑖,𝑑,𝑘))
+todocumentswith𝑠𝑖,𝑑=  0.Thiscompositionconcentratespositives                           Lconf =−
+where the genuine evidence lives while exposing the Critic specifi-                                𝑘=1 𝑑∈C(𝑘)
+cally to the biased distractors that arrive from the perturbed query                                       𝑖                                                       (6)
+at deployment. We denote the resulting per-group candidate list as                     Thisregresses𝜎(𝑧 𝑖,𝑑,𝑘)directlyontotheempiricalrobustnessprob-
+C(𝑘)𝑖    (|C(𝑘)𝑖|=𝑁+    1); groupswithP𝑖=∅ are skipped,yielding up                     ability, so theCritic’s output behaveslike acalibratedestimator of
+to𝑁    train×𝐾listwise instances.                                                      Pr[M(˜𝑥,𝑑)=𝑦|    ˜𝑥∼𝑝(𝛿)]rather than a bare ranking score.
+   Step2:CriticArchitecture.The Evidence Critic𝑓𝜃is parame-                               TotalLoss.The final objective is a weighted sum:
+terizedasalightweightcross-encoder(e.g.,initializedfromDeBERTa-                                                  Ltotal =L  rank+Lconf                                (7)
+v3-large).Foreachlistwisetraininggroup(𝑖,𝑘),ittakestheconcate-
+nation[˜𝑥(𝑘)𝑖  ;𝑑]as input for every𝑑∈C(𝑘)𝑖   , pairing the perturbed                  Crucially,these twoobjectives are mathematicallysynergistic and
+query with each candidate document, mirroring the format the                           functionallycomplementary.Lrank optimizestherelativediscrimi-
+Critic encounters at inference time where the user’s submitted                         nativemarginbetweenthepositiveanchorandthesampledhard
+query is itself a (potentially biased) realization of the underlying                   negativeswithineachgroup.Lconf,operatingpointwiseoverthe
+intent, and outputs a per-document logit𝑧𝑖,𝑑,𝑘=𝑓𝜃(˜𝑥(𝑘)𝑖 ,𝑑). The                      same11documents,anchorstheabsolutescaleofthelogitssothat
+predicted robustness probability is given by ˆ𝑠𝑖,𝑑,𝑘=𝜎(𝑧  𝑖,𝑑,𝑘). The                  𝜎(𝑧)   approximates a calibrated robustness probability. By mini-
+critic input is conditioned on the perturbed query, while its tar-                     mizing this joint objective, the Evidence Critic learns to identify
+get𝑠𝑖,𝑑isthe bias-spectrum-averagedrobustness;this asymmetry                           subtle semanticfeatures (e.g., clarity, factualdensity, contradiction
+teaches the Critic to recognize evidential strength preciselyfrom                      handling) that correlate with high robustness, bypassing the need
+insideabiased queryrealization,whichis theregimeitwillface at                          for expensive simulations at inference time.
+deployment.                                                                            3.4   Inference:Risk-AwareRetrievaland
+
+3.3.2   HybridOptimizationObjective.TotraintheCriticeffectively,                               Abstention
+we must balance two objectives: accurately ranking robust docu-                        During inference, CoRM-RAG operates efficiently by using the
+ments higherthan fragileones (Ranking)and estimating therelia-                         trainedEvidenceCriticasarisk-awarereranker.Acriticalchallenge
+bility of the evidence (Confidence Scoring). We propose a hybrid                       in transitioning from training to inference is that standard RAG
+lossfunctionthatalignsrelativerankingwithabsolutepointwise                             systemstypicallyappendafixednumberoftop-𝐶 documentstothe
+calibration:                                                                           generator’s context. If we merely base the safety guarantee on the
+   1.ListwiseRankingLoss(Lrank).For each per-perturbation                              top-1 document, highly ranked but sycophantic distractors (e.g., at
+listwisegroup(𝑖,𝑘),wenormalizethesoftrobustnessscores{𝑠𝑖,𝑑}𝑑∈C(𝑘)                      rank2or3)couldstillpoisonthecontextandinducehallucinations,
+                                                                                𝑖      breaking the theoretical safety metric.
+intoatargetdistributionoverthe𝑁+ 1candidates,andminimizethe
+cross-entropyagainstthestudent’spredicteddistributioncomputed                             Tobridgethisgapandpreservethecausalguaranteesestablished
+via a temperature-scaled softmax over the output logits:                               duringsingle-documenttraining,weintroduceaDynamicRobust
+                                                                                       Contextmechanism (Algorithm 1). Instead of blindly feeding a
+             𝐾∑︁  ∑︁                                                                   fixed-sizecontext,thesystemstrictlygatestheinclusionofevery
+Lrank =−                ©­Í     𝑠𝑖,𝑑      ª®log©­Í      exp(𝑧  𝑖,𝑑,𝑘/𝜏)      ª®        candidate up to the maximum context limit𝐶. Only documents
+
+            𝑘=1 𝑑∈C(𝑘)  «   𝑑′∈C(𝑘)𝑖 𝑠𝑖,𝑑′¬     «   𝑑′∈C(𝑘)𝑖    exp(𝑧  𝑖,𝑑′,𝑘/𝜏)¬      whose predicted robustness score exceeds the safety threshold𝛾
+                     𝑖                                                                 are appended to the generator’s prompt.
+                                                                            (5)           This mechanism serves a dual purpose: (1)ContextPurifica-
+wherethetemperature𝜏controlsthesmoothness ofthestudent’s                               tion:Itensuresthatthegeneratorisexclusivelyexposedtoevidence
+predicteddistribution.Because𝑠𝑖,𝑑takesvaluesin{0,1/𝐾,...,1},                           that has been individually vetted to withstand cognitive noise. (2)
+this target naturally distributes mass proportional to how strongly                    Risk-AwareAbstention:By exploiting the sorted nature of the
+eachcandidate withstoodthebias spectrum,asoft signalthatpre-                           candidates, the system performs an efficient short-circuit check:
+vents the Critic from collapsing to a winner-take-all ranking when                     if even the highest-ranked document fails to meet the threshold
+severaldocumentsarepartiallyrobust.Awell-calibrated𝜏further                            (S[0]<𝛾   ), it indicates that the entire retrieved pool is fragile or
+prevents the model from becoming overly confident too early in                         sycophantic.Inthisscenario,thesystemimmediatelyabstainsfrom
+training,ensuring stablegradient flowacrossthe entirecandidate                         answering,preventingahigh-confidencehallucinationandsaving
+set while pushing the logits of robust documents (high𝑠) above                         computational overhead.
+thoseof fragile ones(𝑠=   0).By construction theanchorpositivein
+C(𝑘)𝑖    has𝑠𝑖,𝑑>  0,sothedenominatorisnon-zero;thelossislocally                          InterpretationoftheSafetyThreshold𝛾.Thethreshold𝛾explicitly
+masked for the rare degenerate case where, due to filtering, the                       represents the user’s risk tolerance. In high-stakes domains (e.g.,
+entire group sums to zero.                                                             medical advice or legal analysis),𝛾can be set stringently high (e.g.,
+   2.PointwiseConfidenceLoss(Lconf).Rankingaloneensures                                0.8). This ensures that the system only incorporates evidence that
+relativeordering butdoes notguarantee thattheoutput scorerep-                          has historically demonstrated an 80% probability of withstanding
+resents a calibrated absoluteprobability. To enable risk assessment                    adversarial perturbations. By filtering the context through this
+and abstention, we add a pointwise binary cross-entropy term                           lens, CoRM-RAG explicitly links the retrieval score to a tangible
+
+========== PDF PAGE 6 / 12 ==========
+SIGIR ’26, July 20–24, 2026, Melbourne, VIC, Australia                                                                                                                                                                             Peiyang Liu et al.
+
+Algorithm1CoRM-RAG Inference Procedure                                                       •RQ2(RiskAssessment):CantheEvidenceCriticeffectively
+  1:Input:Query𝑥, RetrieverR, Critic𝑓               𝜃, GeneratorM                               distinguish robust evidence from fragile ones, enabling reli-
+  2: Parameters:Top-        𝑀 candidates,MaxContext𝐶,SafetyThresh-                              able risk-aware abstention?
+     old𝛾                                                                                    •RQ3(Efficiency):Does the proposed distillation pipeline
+  3:                                                                                            offer a favorable trade-off between inference latency and
+  4:// Step 1: Initial Retrieval                                                                performance?
+
+  5:D  cand←R(𝑥,top-𝑀)
+  6:                                                                                    4.1   DatasetsandBenchmarks
+
+  7:// Step 2: Robustness Scoring                                                       We utilize a combination of standard and adversarial datasets to
+  8:S←∅                                                                                 stress-test retrieval robustness.
+  9:for𝑑∈D         cand do                                                                   •StandardBenchmarks:We use the open-domain versions
+ 10:𝑠←𝜎(𝑓     𝜃(𝑥,𝑑))// Predicted Robustness Prob.                                              ofNaturalQuestions(NQ)[    29]andWebQA[        8]toensure
+ 11:S.append(𝑠)                                                                                 performance stability on neutral queries.
+ 12:endfor                                                                                   •Adversarial:We employTruthfulQA[                   42] to test handling
+ 13:                                                                                            of common misconceptions.
+ 14:// Step 3: Risk-Aware Abstention (Short-Circuit)                                         •Biased-NQ(ChallengeSet):To explicitly address RQ1, we
+ 15:SortD             cand descending by scoresS                                                construct a synthetic test set of 3,610 NQ queries derived
+ 16:ifS[0]<𝛾then                                                                                from theNQ test set, injected with adversarialnoise via our
+ 17:  Return“Abstain: Insufficient reliable evidence”.                                          Cognitive Perturbation Protocol(Sec. 3.2). The set is balanced
+ 18:endif                                                                                       across:(1)FalsePremise(theaskerholdsawrong-beliefentity
+ 19:                                                                                            thatsurfacesasapresupposition);(2)Confirmation Bias(the
+ 20:// Step 4: Dynamic Context Construction & Generation                                        askersincerelybelievesafalsehistorical,temporal,quantita-
+ 21:𝑑 ∗←∅                                                                                       tive, or relational claimabout the topic); and (3)Distraction
+ 22:for𝑖=0to𝐶−1do                                                                               (anunrelated-domainsentenceappendedtothequery). To
+ 23:  ifS[𝑖]<𝛾then                                                                              prevent leakage, training perturbations are generated by
+ 24:     break// Early stopping since array is sorted                                           Qwen-3-32B, while test perturbations useGPT-4o.
+ 25:  endif
+ 26:𝑑 ∗.append(D    cand[𝑖])                                                            4.2   Baselines
+ 27:endfor                                                                              We compare CoRM-RAG against three categories of methods:1.
+ 28:  ˆ𝑦←M(𝑥,𝑑∗)                                                                        StandardRetrieval:BM25(sparse) andContriever[                   23] (strong
+ 29:Return     ˆ𝑦(Confidence:S[0])                                                      densebaseline).2.Reranking&Verification:(i)Cross-Encoder:
+                                                                                        A BERT-large reranker trained on MS MARCO. (ii) Perturbation
+safetymetric—apropertyfundamentallylackinginstandardcosine-                             AugmentedCross-Encoder(PA-CE):Astandardpointwiseverifica-
+similaritybasedRAG,wherescoresmerelyreflectgeometricvector                              tionbaselinetrainedonouradversarialdatasetusingbinarycross-
+overlap rather than true decision reliability.                                          entropy. This represents conventional safety-filtering approaches
+                                                                                        andisolatesthearchitecturalbenefitsofourlistwiseevidencecritic.
+3.5   ConnectiontoCausalInference                                                       (iii)LLM-Rerank: Zero-shot prompt (“Rank these documents by
+                                                                                        relevance to thequery andability to correct user misconceptions”)
+From a causal perspective, standard RAG estimates the observa-                          reranking using GPT-4o.3.Robustness&UncertaintyEstima-
+tional correlation𝑃(𝑌|𝑋,𝐷)    . However, spurious correlations often                    tion:(i)Self-RAG[               4]: Uses critic tokens for self-reflection. (ii)
+exist;forexample,adocumentmightsharekeywordswiththequery                                CalibRAG[6]: Focuses on calibrating model confidence.
+butcontainoutdatedinformation.Ourperturbationprotocolcanbe
+viewed as an approximation of thedo-operator  𝑃(𝑌|𝑑𝑜(𝑋),𝐷)           . By               4.3   ImplementationDetails
+intervening on𝑋 (via perturbations) and demanding invariance in                         Models.We employ         Qwen-3-8B [66] as the GeneratorM  and
+𝑌,weforcetheretrievalsystemtoselect𝐷 thatactsasavalidcausal                             Qwen-3-14B as Teacher. The Evidence Critic𝑓𝜃 is initialized with
+parent of the correct decision𝑌, rather than a confounder. This                         DeBERTa-v3  large.Training.The Critic is distilled on approxi-
+theoreticalgroundingexplainswhyCoRM-RAGgeneralizesbetter                                mately50k(query,perturbation)traininggroupsderivedfromNQ
+to out-of-distributionqueries, asdemonstrated inour experiments.                        (∼10k unique queries×5 perturbations per query). We train for 3
+4   ExperimentalSetup                                                                   epochs (batch size32, AdamW optimizer,𝑙𝑟=  5𝑒−5) withlistwise
+                                                                                        temperature𝜏=   1.0.Inference.Weretrievethetop-100documents
+In this section, we detail the experimental protocols designed to                       usingContrieverandrerankthem.Toensureafair,apples-to-apples
+evaluatetheefficacyofCoRM-RAGinrobustdecision-making.Our                                comparisonwithstandard baselinesinourmainresults(Table1),
+experiments aim to answer three key research questions:                                 we evaluate all models under a forced-generation setting (100%
+     •RQ1(Robustness):Does CoRM-RAG effectively mitigate                                coverage).Thedynamicsafetythreshold𝛾anditscorresponding
+        the impact of user cognitive biases (e.g., confirmation bias)                   risk-aware abstention capabilities are specifically evaluated in our
+        compared to standard retrieval methods?                                         risk-coverage analysis (Section 5.2).
+
+========== PDF PAGE 7 / 12 ==========
+              Beyond Semantic Relevance: Counterfactual Risk Minimization for Robust Retrieval-Augmented Generation                      SIGIR ’26, July 20–24, 2026, Melbourne, VIC, Australia
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+              Table1:MainResults.CoRM-RAGsignificantlyoutperformsstandardretrievers(BM25,Contriever),data-augmentedbaselines
+              (PA-CE),andadvancedmethods(LLM-Rerank,Self-RAG).ThebottomsectiondemonstratesZero-ShotTransferabilitytounseen
+              generators.
+
+
+              4.4   EvaluationMetrics                                                                DisentanglingDatavs.Method(PA-CEAnalysis).Toisolate
+              We report: (1)Decision Accuracy (Acc): Verified by          GPT-5. For             thesourceofourgains,wecompareagainstPA-CE,whichactsasa
+              False Premisequeries, thejudge evaluatesstrict factual correctness:                standard pointwisesafety filter trained on theexact sameadversar-
+              the generator must output the true factual answer rather than                      ialdatausingbinarycross-entropy.WhilePA-CEimprovesoverthe
+              succumbing to the injected false premise. (2)Robustness Drop                       standardCross-Encoder(+7.1%)bylearningtorejectexplicitsyco-
+              (Δ 𝑅𝑜𝑏): Acc clean−Acc   biased.                                                   phanticnoise,CoRM-RAGachievesafurthersubstantialgain
+                                                                                                 of4.6%overPA-CE(52.6%vs.48.0%).Thishighlightsafundamen-
+                                                                                                 tallimitationofpointwiseverification:predictingabsolutebinary
+                                                                                                 labelsinisolationstrugglestocapturetherelativeevidentialmar-
+              5   ExperimentalResults                                                            ginswithinacandidatepool.CoRM-RAG’slistwiseobjective(Eq.5)
+              5.1   MainResults:DefendingAgainstCognitive                                        forces the model to directly contrast corrective evidence against
+                      Perturbations                                                              sycophanticdistractors,yieldingamorediscriminativerobustness
+              WefirstaddressRQ1,evaluatingCoRM-RAGagainstacomprehen-                             signal for ranking.
+              sive suite of baselines on standard (NQ, WebQA) and adversarial                        ComparisonwithAdvancedBaselines.CoRM-RAGalso out-
+              benchmarks(Biased-NQ,TruthfulQA).Table1summarizesthere-                            performssophisticatedcompetitors.(1)LLM-Rerank(GPT-4o):
+              sults.                                                                             CoRM-RAG maintainsacompetitive edge (+1.6%) overtheheavy
+                 TheVulnerabilityofStandardRetrieval.Standardparadigms                           LLM-based reranker on Biased-NQ. This highlights that while
+              exhibit noticeable performance degradation under cognitive noise.                  general-purpose LLMs possess strong reasoning capabilities, their
+              Sparse (BM25) and dense (Contriever) retrievers exhibit clear                      instruction-tuningobjectives(e.g.,‘helpfulness’)maystillintroduce
+              drops onBiased-NQ(28.0% and 39.5% accuracy), as they tend to                       aslightbiastowardssycophancy,whereasourspecializedlistwise
+              matchthekeywordsofthebiasedpremise.EventhestandardCross-                           distillation explicitly optimizes for evidential robustness. (2)Self-
+              Encoder, despite its strong performance on clean data (46.1%),                     RAG&CalibRAG:Whilethesemethodsimproveoverstandard
+Method (Generator: Qwen-3-8B)                     Clean Settings              Adversarial SettingsRAG by modeling uncertainty, they fallshort of CoRM-RAG (e.g.,RobustnessEfficiency
+              falls to 40.9% in adversarial settings. Qualitative analysis revealsNQ     WebQABiased-NQ    TruthfulQASelf-RAGtrailsby6.1%).ThisislikelybecauseSelf-RAGreliesonGap (↓)Latency (ms)
+              that these models optimize for semantic similarity𝑃(𝑑|𝑥)     ; thus,               thegenerator’sownreflection,whichispronetothesamebiases,
+Standard Retrieval & Rerankingwhen𝑥contains a false premise, they actively retrieve sycophantic
+BM25          documents that reinforce the error, creating an “echo chamber”.32.4         28.128.0                    30.04.4                <10
+Contriever [23]                                   45.8         39.5             39.5                    34.9             6.3                   25
+Cross-Encoder (MS MARCO)                          46.1         37.3             40.9                    35.5             5.2                  210
+Cross-Encoder (PA-CE)                             54.3         47.8             48.0                    45.8             6.3                  210
+LLM-Rerank (GPT-4o)                               54.5        48.9              51.0                    46.5             3.5                 ∼20s
+Robustness-Oriented Baselines
+Self-RAG [4]                                      49.6         44.2             46.5                    45.6             3.1                  850
+CalibRAG [6]                                      51.8         46.0             48.0                    46.2             3.8                 2200
+CoRM-RAG (Ours)                                   53.9         48.2            52.6                  47.0                1.3                  215
+Cross-Generator Generalization (Critic trained on Qwen, applied to unseen Generators)
+Generator: Llama-3-8B
+   w/ Cross-Encoder                               51.5         45.9             42.8                    42.5             8.7                    -
+   w/ CoRM-RAG (Transfer)                         53.2         47.8            46.5                  44.1                6.7                    -
+Generator: GPT-4o
+   w/ Cross-Encoder                               53.8         48.1             46.9                    48.2             6.9                    -
+   w/ CoRM-RAG (Transfer)                         55.1        49.5             53.2                  51.8                1.9                    -
+
+========== PDF PAGE 8 / 12 ==========
+SIGIR ’26, July 20–24, 2026, Melbourne, VIC, Australia                                                                                                                                                                             Peiyang Liu et al.
+
+                                                                                    62.0%, and reducing coverage to 50% boosts the selective accu-
+                                                                                    racyto78.0%.ThismonotoniccalibrationconfirmsthattheCritic
+                                                                                    successfully decouples semantic relevance from decision safety,
+                                                                                    accurately isolating and filtering out fragile evidence.
+
+                                                                                    5.3   TheRelevance-RobustnessGapAnalysis
+                                                                                    A central hypothesis of this work is that in adversarial decision-
+                                                                                    making environments,semantic relevancediverges significantly
+                                                                                    fromevidential robustness. To empirically validate this gap, we
+                                                                                    evaluatehoweffectivelydifferentrerankerssurfaceground-truth
+                                                                                    evidence when faced with biased queries. Specifically, we analyze
+                                                                                    theBiased-NQtestset,whereeachretrievedpassageisannotated
+                                                                                    withabinaryhas_goldlabelindicatingthepresenceofthefactual
+                                                                                    answer necessary to correct the user’s misconception.
+                                                                                       Figure4 presentstwocomplementary perspectivesonranking
+Figure 3: Risk-Coverage Analysis on Biased-NQ. We plot                              quality,evaluatedovera subsetof2,728Biased-NQquerieswhere
+Selective Accuracy against Coverage (Recall Rate). Cross-                           the initial Contriever top-100 candidate pool contains at least one
+Encoder(Red)exhibitsaflat,fluctuatingtrajectory,indicat-                            gold-bearing passage.
+ingthatsemanticconfidencecorrelatespoorlywithcorrect-                                  1.AggregateEvidentialRecall.Figure4(a)illustratesRecall@  𝑘
+nessunderadversarialbias.CoRM-RAG(Blue)showsasteep                                  across varying rank cutoffs. CoRM-RAG consistently outperforms
+ascent, effectively filtering out fragile evidence. Note the                        boththeContrieverbaselineandthesemanticCross-Encoderatev-
+jagged fluctuations in the low-coverage region (<   10%), re-                       erydepth.Crucially,theperformancemarginismostpronouncedat
+vealingthatevenamongthehighest-confidencepredictions,                               the decision-critical topranks: at𝑘=   1, CoRM-RAG improves recall
+rare“fatalhallucinations”persist,preventingthemodelfrom                             from36  .5%(Cross-Encoder)to48   .3%(anabsolutegainof +11.8%).
+reachingartificialperfection(100%).                                                 Similarly, at𝑘=   5, it achieves77  .8%compared to66   .8%. To match
+                                                                                    the𝑅@5performance of CoRM-RAG, the standard Cross-Encoder
+                                                                                    must expand its retrieval window to𝑘=   10, effectively doubling
+                                                                                    the context length and the computational burden imposed on the
+whereas CoRM-RAG injects external supervision via the counter-                      downstream generator.
+factual protocol. On TruthfulQA, where misconceptions are deeply                       2.Per-QueryRankDynamics.Toisolatethesourceofthese
+ingrained in pre-training data rather than explicitly injected via                  gains,Figure4(b)providesapairedcomparisonoftherankassigned
+querycontext,CoRM-RAGmaintainsacompetitiveedge,though                               tothe highest-placed goldpassagebythe Cross-Encoder(𝑥-axis)
+the margins are narrower compared to Biased-NQ.                                     versusCoRM-RAG(𝑦-axis)foreachindividualquery.Whiletheden-
+   Cross-Generator Generalization.Finally, we test whether                          sitynaturallyconcentratesinthebottom-leftquadrant(whereboth
+the Evidence Critic overfits to the teacher (Qwen). We apply the                    models succeed), the distribution is markedly skewedbelowthe
+sameCritictorankdocumentsforunseengenerators,        Llama-3and                     diagonal. Specifically, CoRM-RAG ranks the gold passage strictly
+GPT-4o (Table 1, bottom). CoRM-RAG maintains a solid advantage                      higherthantheCross-Encoderfor45 .7%ofthequeries,whereasthe
+overtheCross-Encoder(e.g.,+3.7%onBiased-NQforLlama-3).This                          Cross-Encoderissuperiorinonly27  .1%ofcases(anetadvantageof
+indicatesthatthe“RobustnessUtility”capturesuniversallinguistic                      +18.6%).Theremaining27       .2%representties.SincetheBiased-NQ
+properties of evidence, such as factual density and logical contra-                 test set isentirely adversarial by design, theseties predominantly
+diction ofpremises,rather thanmodel-specificheuristics, enabling                    consistofinstanceswheretheinjectedcognitivenoise(e.g.,aType
+CoRM-RAG to serve as a modular safety component.                                    IIItopicaldistraction)failstosurfacestrongsycophantichardnega-
+                                                                                    tivesinthecandidatepool.Insuchcases,thecorequestion’slexical
+5.2   Risk-AwareAbstentionandCoverage                                               signalremainsoverwhelming,allowingeventhestandardsemantic
+       Analysis                                                                     Cross-Encoder to successfully anchor the gold evidence at rank 1.
+To addressRQ2, we evaluate whether the Evidence Critic enables                         Together,thesefindingsvalidatetheRelevance-RobustnessGap.
+reliable risk assessment via selective prediction. We analyze the                   The Evidence Critic’s robustness signal captures causal utilitybe-
+trade-offbetweencoverage(answeringrate) andaccuracy byvary-                         yondmeresemanticoverlap.Byactivelypromotingcorrectiveevi-
+ing the abstention threshold𝛾.                                                      dence on a per-query basis—precisely in instances where standard
+   Figure3 illustratesthe Risk-Coveragecurves onBiased-NQ.The                       rerankersaredistractedbysycophanticnoise—CoRM-RAGensures
+standardCross-Encoderexhibitsadangerouslyflattrajectory,con-                        thatthegeneratoris groundedintruthratherthantrappedinthe
+firmingthatsemanticconfidenceismiscalibratedunderadversarial                        user’s cognitive bias.
+bias—the model is often “confident but wrong” when retrieving                       5.4   AblationStudy:DeconstructingtheCritic
+sycophanticevidence.Incontrast,CoRM-RAGdemonstratesasteep
+and mathematically consistent ascent: abstaining from the bottom                    To investigate whether the Evidence Critic acquires specific causal
+20% of low-confidence queries improves accuracy from 52.6% to                       mechanismsversusgenericqualityheuristics,weconducta“lesion
+
+========== PDF PAGE 9 / 12 ==========
+Beyond Semantic Relevance: Counterfactual Risk Minimization for Robust Retrieval-Augmented Generation                      SIGIR ’26, July 20–24, 2026, Melbourne, VIC, Australia
+
+                                                                                    5.5   Efficiencyvs.PerformanceTrade-off
+                                                                                    We investigate the practical viability of CoRM-RAG by mapping
+                                                                                    theParetofrontierbetweenrobustnessandlatency(Figure7).Stan-
+                                                                                    dardretrievers(e.g.,Contriever)areefficient(<  25ms)butfragile
+                                                                                    under bias (<  40%accuracy on Biased-NQ), while inference-time
+                                                                                    reasoning methods (e.g., LLM-Rerank, Self-RAG) improve safety at
+                                                                                    the cost of prohibitive latency (>  800ms). CoRM-RAG effectively
+                                                                                    breaks this trade-off by shifting the computational burden of coun-
+                                                                                    terfactual reasoning from inference to training. Since the Evidence
+Figure 4: Retrieval Quality on Biased-NQ. (a) Recall@𝑘vs.                           Critic shares the same architecture as a standard Cross-Encoder
+rankcutoff𝑘(logscale).CoRM-RAGdemonstratessustained                                 (DeBERTa-v3),itmaintainsalowlatencyof∼215ms.However,due
+superiority over baselines, with a notable+11.8%absolute                            to the distilled cognitive perturbation signal, it achieves a11.7%
+gain at𝑅@1. (b) Paired rank comparison of each query’s                              accuracy gain over the standard Cross-Encoder (40.9%→ 52.6%)
+highest-placedgoldpassage.Pointsbelowthediagonalindi-                               and outperforms the GPT-4o-based LLM-Rerank by 1.6% while
+catequerieswhereCoRM-RAGranksthegoldpassagehigher                                   beingapproximately93   ×faster.ThisplacesCoRM-RAGattheop-
+thantheCross-Encoder.CoRM-RAGpromotesthecorrectev-                                  timalParetopoint,offeringthesafetyguaranteesoflargereasoning
+idencein45 .7%ofqueries,yieldinganetadvantageof +18.6%.                             models with the throughput of conventional ranking systems.
+
+
+
+
+
+                                                                                    5.6   HyperparameterSensitivity
+                                                                                    WeexaminetheimpactofthreecriticalhyperparametersonCoRM-
+                                                                                    RAG’sperformance:perturbationdepth𝐾,distillationtemperature
+                                                                                    𝜏, and retrieval depth𝑀. Figure 6 summarizes the results.
+                                                                                    Adversarial Diversity (𝐾) and Temperature (𝜏).As shown in
+                                                                                    Figure 6(a), accuracy improves withperturbationdiversity, exhibit-
+                                                                                    ingdiminishingreturnsbeyond𝐾=    5.Notably,CoRM-RAGtrained
+                                                                                    with a single perturbation (𝐾=    1) already outperforms the point-
+                                                                                    wise baseline (PA-CE). Since setting𝐾=     1restricts the training
+Figure 5: Ablation Study on Cognitive Perturbation Types.                           data volume to be strictly comparable to the PA-CE setup, this
+We evaluate variants of the Critic trained without specific                         performancegappreciselyisolatesthealgorithmicbenefitofour
+perturbationtypes.                                                                  listwiseformulation.UnlikePA-CE’spointwisebinaryobjective,our
+                                                                                    listwise loss (Eq. 5) forces the Critic to explicitly contrast robust
+                                                                                    evidenceagainstsycophanticdistractorswithinthesamecandidate
+                                                                                    pool,optimizingforrelativeevidentialmarginsratherthanscoring
+                                                                                    documents in isolation.
+study”ontheCognitivePerturbationProtocol.Wetrainthreeablated                           Regarding the temperature𝜏applied to the student’s logits (Fig-
+variants,eachblindedtoonespecificperturbationtype(TypeI,II,or                       ure6b), weobserve thatextremevalues degradeperformance. Low
+III)duringdistillation,while maintainingconstanttrainingsizevia                     temperatures (𝜏=    0.1) make the student’s predicted distribution
+upsampling.WeevaluatethesevariantsagainsttheFullCoRM-RAG                            overlysharp,leadingtobrittlegradientsthatoverfittospecificlocal
+on corresponding adversarial test subsets.                                          perturbations. Conversely, high temperatures (𝜏=   3.0) excessively
+   ResultsinFigure5revealastrikingdiagonaldominance,confirm-                        flattenthepredictions,dilutingthediscriminativemarginbetween
+ingtheorthogonalityofcognitiveerrors.ExcludingFalse Premise                         robust and fragile documents. We adopt𝜏=    1.0as the optimal
+(Type I) triggers a performance drop on Type I queries (50.2%→                      setting to maintain stable gradient flow and maximize decision
+45.4%) without significantly impactingDistraction(Type III) ro-                     accuracy.
+bustness. This impliesthat learning to filter irrelevant noise does                 TheNecessityofDeepRetrieval(𝑀).Figure6(c)revealsacritical
+not generalize to detecting false presuppositions about entities.                   “BuriedTruth”phenomenon.CoRM-RAGgainssubstantialaccuracy
+Similarly, removingConfirmation Bias(TypeII) trainingdegrades                       (+8.7%) as the candidate pool𝑀 expands from 10 to 100. This con-
+performance on misconception-ladenqueries (53.5%→ 45.2%), as                        firms our hypothesis that robust, corrective documents often lack
+theCriticfailstolearnthespecificutilityof“corrective”evidence                       semanticoverlapwithbiased queriesandareinitiallyrankedlow
+over evidence that merely echoes the user’s mistakenworldview.                      bydenseretrievers.Conversely,thestandardCross-Encoderfailsto
+The Full CoRM-RAG achieves the highest aggregate performance,                       benefitfromdeeperretrieval,asitpersistentlyprioritizessycophan-
+suggestingthatexposuretoadiverse“pathogenlandscape”isessen-                         tic distractors in the top ranks. Our lightweight Critic effectively
+tialforlearningageneralizedrepresentationofevidentialstrength.                      rescues this buried evidence with negligible latency overhead.
+
+========== PDF PAGE 10 / 12 ==========
+SIGIR ’26, July 20–24, 2026, Melbourne, VIC, Australia                                                                                                                                                                             Peiyang Liu et al.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                            Figure6:ResultsofHyperparameterAnalysis.
+
+
+                                                                                                     where perturbations propagate through chains of thought. Addi-
+                                                                                                     tionally, we plan to explore dynamic, personalized perturbation
+                                                                                                     generation, where the Adversary adapts to specific user profiles
+                                                                                                     tofurtherenhancetheimmunologicalrobustnessoftheretrieval
+                                                                                                     system.
+
+                                                                                                     References
+                                                                                                      [1]  ShakibaAmirshahi,AminBigdeli,CharlesLAClarke,andAmiraGhenai.2025.
+                                                                                                           Evaluating the Robustness of Retrieval-Augmented Generation to Adversarial
+                                                                                                           Evidence in the Health Domain.arXiv preprint arXiv:2509.03787(2025).
+                                                                                                      [2]  GuojiaAn,JieZou,JiweiWei,ChaoningZhang,FumingSun,andYangYang.2025.
+                                                                                                           Beyondwholedialoguemodeling:Contextualdisentanglementforconversational
+                                                                                                           recommendation. InProceedings of the 48th International ACM SIGIR Conference
+                                                                                                           on Research and Development in Information Retrieval. 31–41.
+                                                                                                      [3]  Dang Anh-Hoang, Vu Tran, and Le-Minh Nguyen. 2025. Survey and analysis of
+                                                                                                           hallucinations in large language models: attribution to prompting strategies or
+                                                                                                           model behavior.Frontiers in Artificial Intelligence8 (2025), 1622292.
+                                                                                                      [4]  Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, and Hannaneh Hajishirzi.
+Figure7:Efficiency-PerformanceParetoFrontieronBiased-                                                      2024. Self-rag:Learningtoretrieve,generate,andcritiquethroughself-reflection.
+                                                                                                           (2024).
+NQ.                                                                                                   [5]  Rishi Bommasani. 2021. On the opportunities and risks of foundation models.
+                                                                                                           arXiv preprint arXiv:2108.07258(2021).
+                                                                                                      [6]Viola Campos, Robin Kuschnereit, and Adrian Ulges. 2025. Multicalibration for
+                                                                                                           LLM-based Code Generation.arXiv preprint arXiv:2512.08810(2025).
+6   Conclusion                                                                                        [7]  Erica Cau, Valentina Pansanella, Dino Pedreschi, and Giulio Rossetti. 2025. Se-
+                                                                                                           lective agreement, not sycophancy: investigating opinion dynamics in LLM
+Inthiswork,wechallengedtheprevailingassumptioninRetrieval-                                                 interactions.EPJ Data Science14, 1 (2025), 59.
+Augmented Generation that semantic relevance serves as a suf-                                         [8]  YingshanChang,MriduNarang,HisamiSuzuki,GuihongCao,JianfengGao,and
+                                                                                                           Yonatan Bisk. 2022. Webqa: Multihop and multimodal qa. InProceedings of the
+ficient proxy for decision utility. We identified the “Relevance-                                          IEEE/CVF conference on computer vision and pattern recognition. 16495–16504.
+Robustness Gap”, demonstrating that in realistic scenarios laden                                      [9]  JiaweiChen,HongyuLin,XianpeiHan,andLeSun.2024. Benchmarkinglarge
+withusercognitivebiases,standardretrievalalgorithmsoftenactas                                              language models in retrieval-augmented generation. InProceedings of the AAAI
+                                                                                                           Conference on Artificial Intelligence, Vol. 38. 17754–17762.
+echochambersthatreinforcehallucinationsratherthancorrecting                                          [10]  Myra Cheng, Sunny Yu, Cinoo Lee, Pranav Khadpe, Lujain Ibrahim, and Dan
+them.Tobridgethisgap,weintroducedCoRM-RAG,aframework                                                       Jurafsky. 2025. Social sycophancy: A broader understanding of llm sycophancy.
+                                                                                                           arXiv preprint arXiv:2505.13995(2025).
+groundedintheprinciplesofCounterfactualRiskMinimization.By                                           [11]  Ivan Andre NaranjoCoronel, CanDemircan, andEric Schulz.[n.d.]. HowDoes
+subjectingtheretrievalprocesstoaCognitive Perturbation Protocol,                                           an LLM Process Conflicting Information In-Context? ([n.d.]).
+weshiftedtheoptimizationobjectivefrommaximizinglikelihoodto                                          [12]  Florin Cuconasu, Giovanni Trappolini, Federico Siciliano, Simone Filice, Cesare
+                                                                                                           Campagnano, Yoelle Maarek, Nicola Tonellotto, and Fabrizio Silvestri. 2024. The
+maximizing evidential robustness. Our proposedEvidenceCritic                                               powerofnoise: Redefining retrievalforragsystems.InProceedings of the 47th
+successfully distills the reasoning capabilities of large generator                                        International ACM SIGIR Conference on Research and Development in Information
+models into an efficient scoring module, enabling real-time, risk-                                         Retrieval. 719–729.
+                                                                                                     [13]  Josef Dai, Xuehai Pan, Ruiyang Sun, Jiaming Ji, Xinbo Xu, Mickel Liu, Yizhou
+aware retrieval. Extensive experiments confirm that CoRM-RAG                                               Wang, and Yaodong Yang. 2023.  Safe rlhf: Safe reinforcement learning from
+notonlydefendsagainstconfirmationbiasandadversarialnoisebut                                                human feedback.arXiv preprint arXiv:2310.12773(2023).
+                                                                                                     [14]  Zhiying Deng, Wei Liu, Jianjun Li, Zhiqiang Guo, Qian Chen, and Juan Zhao.
+alsoprovidesreliableconfidencescores,allowingforsafeabstention                                             2025.  Behavior-Aware Global-Enhanced Neural Modeling for Sequential Set
+inhigh-stakesenvironments.Ourfindingssuggestaparadigmshift                                                 Recommendation.IEEE Transactions on Artificial Intelligence(2025).
+forRAG:frominformationfindingtocausalintervention.Future                                             [15]  Haonan Dong, Kehan Jiang, Haoran Ye, Wenhao Zhu, Zhaolu Kang, and Guo-
+                                                                                                           jie Song. 2026. NeuReasoner: Towards Explainable, Controllable, and Unified
+workwillextendthisframeworktomulti-hopreasoningscenarios,                                                  Reasoning via Mixture-of-Neurons.arXiv preprint arXiv:2604.02972(2026).
+
+========== PDF PAGE 11 / 12 ==========
+Beyond Semantic Relevance: Counterfactual Risk Minimization for Robust Retrieval-Augmented Generation                      SIGIR ’26, July 20–24, 2026, Melbourne, VIC, Australia
+
+
+[16]  Haonan Dong, Wenhao Zhu, Guojie Song, and Liang Wang. 2025.   Aurora:                                 [38]  XipingLi,AierYang,JianghongMa,KangzheLiu,ShanshanFeng,HaijunZhang,
+      Breaking low-rank bottleneck of lora with nonlinear mapping.arXiv preprint                                   andYi Zhao.2026. CPGRec+:A Balance-orientedFramework forPersonalized
+      arXiv:2505.18738(2025).                                                                                      VideoGameRecommendations.ACM Transactions on Information Systems44,3
+[17]  YangyiFang,JiayeLin,XiaoliangFu,CongQin,HaolinShi,ChaowenHu,LuPan,                                           (2026), 1–44.
+      KeZeng,andXunliangCai.2026. Howtoallocate,howtolearn?dynamicrollout                                   [39]  YuqingLi, JiangnanLi, ZhengLin, ZiyanZhou,Junjie Wu, Weiping Wang,Jie
+      allocation and advantage modulation for policy optimization.arXiv preprint                                   Zhou, and Mo Yu. 2025. Mindscape-Aware Retrieval Augmented Generation for
+      arXiv:2602.19208(2026).                                                                                      ImprovedLongContextUnderstanding.arXiv preprint arXiv:2512.17220(2025).
+[18]  Yangyi Fang, Jiaye Lin, Xiaoliang Fu, Cong Qin, Haolin Shi, Chang Liu, and                            [40]  Yuqing Li, Jiangnan Li, Mo Yu, Guoxuan Ding, Zheng Lin, Weiping Wang, and
+      Peilin Zhao. 2026. Proximity-Based Multi-Turn Optimization: Practical Credit                                 Jie Zhou. 2026. Query-focused and Memory-aware Reranker for Long Context
+      Assignment for LLM Agent Training.arXiv preprint arXiv:2602.19225(2026).                                     Processing.arXiv preprint arXiv:2602.12192(2026).
+[19]  AaronFanous,JacobGoldberg,AnkAgarwal,JoannaLin,AnsonZhou,SonnetXu,                                    [41]  Jiaye Lin, Yifu Guo, Yuzhen Han, Sen Hu, Ziyi Ni, Licheng Wang, Mingguang
+      Vasiliki Bikia, Roxana Daneshjou, and Sanmi Koyejo. 2025. Syceval: Evaluating                                Chen, Hongzhang Liu, Ronghao Chen, Yangfan He, et al. 2025. Se-agent: Self-
+      llmsycophancy.InProceedings of the AAAI/ACM Conference on AI, Ethics, and                                    evolution trajectory optimization in multi-step reasoning with llm-based agents.
+      Society, Vol. 8. 893–900.                                                                                    arXiv preprint arXiv:2508.02085(2025).
+[20]  XiaoliangFu,JiayeLin,YangyiFang,ChaowenHu,CongQin,ZekaiShao,Binbin                                    [42]  StephanieLin,JacobHilton,andOwainEvans.2022. Truthfulqa:Measuringhow
+      Zheng,LuPan, andKe Zeng.2026. Fromlog𝝅        to𝝅 :TamingDivergencein Soft                                   modelsmimichumanfalsehoods.InProceedingsofthe60thannualmeetingofthe
+      ClippingviaBilateralDecoupledDecayofProbabilityGradientWeight.arXiv                                          association for computational linguistics (volume 1: long papers). 3214–3252.
+      preprint arXiv:2603.14389(2026).                                                                      [43]  Peiyang Liu. 2024. Unsupervised corrupt data detection for text training.Expert
+[21]  Xiaoliang Fu, Jiaye Lin, Yangyi Fang, Binbin Zheng, Chaowen Hu, Zekai Shao,                                  Systems with Applications248 (2024), 123335.
+      CongQin,LuPan,KeZeng,andXunliangCai.2026. Maspo:Unifyinggradient                                      [44]  PeiyangLiu,ZhiruiChen,XiWang,DiLiang,YouruLi,ZhiCai,andWeiYe.2026.
+      utilization,probabilitymass,andsignalreliabilityforrobustandsample-efficient                                 Learning from Contrasts: Synthesizing Reasoning Paths from Diverse Search
+      llm reasoning.arXiv preprint arXiv:2602.17550(2026).                                                         Trajectories. arXiv:2604.11365 [cs.AI]  https://arxiv.org/abs/2604.11365
+[22]  KelvinGuu,KentonLee,ZoraTung,PanupongPasupat,andMingweiChang.2020.                                    [45]  PeiyangLiu,ZiqiangCui, DiLiang,andWeiYe.2025. WhoStoleYourData?A
+      Retrievalaugmented languagemodel pre-training.InInternational conference on                                  MethodforDetectingUnauthorizedRAGTheft.arXiv preprint arXiv:2510.07728
+      machine learning. PMLR, 3929–3938.                                                                           (2025).
+[23]  Gautier Izacard, Mathilde Caron, Lucas Hosseini, Sebastian Riedel, Piotr Bo-                          [46]  Peiyang Liu,Sen Wang, Xi Wang, Wei Ye, andShikun Zhang. 2021. Quadruplet-
+      janowski, Armand Joulin, and Edouard Grave. 2021.  Unsupervised dense in-                                    BERT:Anefficientmodelforembedding-basedlarge-scaleretrieval.InProceed-
+      formation retrieval with contrastive learning.arXiv preprint arXiv:2112.09118                                ings of the 2021 Conference of the North American Chapter of the Association for
+      (2021).                                                                                                      Computational Linguistics: Human Language Technologies. 3734–3739.
+[24]  Ziwei Ji, Nayeon Lee, Rita Frieske, Tiezheng Yu, Dan Su, Yan Xu, Etsuko Ishii,                        [47]  Peiyang Liu, Xi Wang, Ziqiang Cui, and Wei Ye. 2025. Queries Are Not Alone:
+      YeJinBang, Andrea Madotto,andPascale Fung.2023. Surveyof hallucinationin                                     Clustering Text Embeddings for Video Search. InProceedings of the 48th Inter-
+      natural language generation.ACM computing surveys55, 12 (2023), 1–38.                                        national ACM SIGIR Conference on Research and Development in Information
+[25]  Kehan Jiang, Haonan Dong, Zhaolu Kang, Zhengzhou Zhu, and Guojie Song.                                       Retrieval. 874–883.
+      2026. Foe: Forest of errors makes the first solution the best in large reasoning                      [48]  Peiyang Liu, Xi Wang, Lin Wang, Wei Ye, Xiangyu Xi, and Shikun Zhang. 2021.
+      models.arXiv preprint arXiv:2604.02967(2026).                                                                Distillingknowledgefrombertintosimplefullyconnectedneuralnetworksfor
+[26]  Thorsten Joachims, AdithSwaminathan, and Tobias Schnabel. 2017. Unbiased                                     efficientverticalretrieval.InProceedingsofthe30thACMInternationalConference
+      learning-to-rank with biased feedback. InProceedings of the tenth ACM interna-                               on Information & Knowledge Management. 3965–3975.
+      tional conference on web search and data mining. 781–789.                                             [49]  PeiyangLiu, XiangyuXi,WeiYe,and ShikunZhang.2022. Label smoothingfor
+[27]  Sungwon Kim and Daniel Khashabi. 2025.  Challenging the Evaluator: LLM                                       textmining.InProceedings of the 29th international conference on computational
+      Sycophancy Under User Rebuttal.arXiv preprint arXiv:2509.16533(2025).                                        linguistics. 2210–2219.
+[28]  SatyapriyaKrishna,KalpeshKrishna,AnhadMohananey,StevenSchwarcz,Adam                                   [50]  PeiyangLiu,JinyuYang,LinWang,SenWang,YunlaiHao,andHuihuiBai.2023.
+      Stambler,Shyam Upadhyay, andManaal Faruqui. 2025. Fact, fetch,and reason:                                    Retrieval-Based Unsupervised Noisy Label Detection on Text Data. InProceed-
+      A unified evaluation of retrieval-augmented generation. InProceedings of the                                 ings of the 32nd ACM International Conference on Information and Knowledge
+      2025 Conference of the Nations of the Americas Chapter of the Association for                                Management. 4099–4104.
+      ComputationalLinguistics:HumanLanguageTechnologies(Volume1:LongPapers).                               [51]  Peiyang Liu, Wei Ye, Xiangyu Xi, Tong Wang, Jinglei Zhang, and Shikun Zhang.
+      4745–4759.                                                                                                   2020. Not all synonyms are created equal: Incorporating similarity of synonyms
+[29]  Tom Kwiatkowski, Jennimaria Palomaki, Olivia Redfield, Michael Collins, Ankur                                toenhancewordembeddings.In2020 International Joint Conference on Neural
+      Parikh, Chris Alberti, Danielle Epstein, Illia Polosukhin, Jacob Devlin, Kenton                              Networks (IJCNN). IEEE, 1–8.
+      Lee,etal.2019. Naturalquestions:abenchmarkforquestionansweringresearch.                               [52]  Wei Liu, Zhiying Deng, Zhongyu Niu, Jun Wang, Haozhao Wang, and Ruixuan
+      Transactions of the Association for Computational Linguistics7 (2019), 453–466.                              Li.2025. Exploringpracticalgapsinusingcrossentropytoimplementmaximum
+[30]  PatrickLewis,EthanPerez,AleksandraPiktus,FabioPetroni,VladimirKarpukhin,                                     mutual information criterion for rationalization.Transactions of the Association
+      Naman Goyal, Heinrich Küttler, Mike Lewis, Wen-tau Yih, Tim Rocktäschel,                                     for Computational Linguistics13 (2025), 577–594.
+      et al. 2020. Retrieval-augmented generation for knowledge-intensive nlp tasks.                        [53]  Lingyu Mu, Hao Deng, Haibo Xing, Jinxin Hu, Yu Zhang, Xiaoyi Zeng, and Jing
+      Advances in neural information processing systems33 (2020), 9459–9474.                                       Zhang. 2026.  Masked Diffusion Generative Recommendation.arXiv preprint
+[31]  Bo Li, Tian Tian, Zhenghua Xu, Hao Cheng, Shikun Zhang, and Wei Ye. 2026.                                    arXiv:2601.19501(2026).
+      Modeling UncertaintyTrendsfor TimelyRetrieval inDynamic RAG.InFortieth                                [54]  Karen Ka Yan Ng, Izuki Matsuba, and Peter Chengming Zhang. 2025. RAG in
+      AAAI Conference on Artificial Intelligence, Thirty-Eighth Conference on Innovative                           health care: a novel framework for improving communication and decision-
+      Applications of Artificial Intelligence, Sixteenth Symposium on Educational Ad-                              making by addressing LLM limitations.Nejm Ai2, 1 (2025), AIra2400380.
+      vances in Artificial Intelligence, AAAI 2026, Singapore, January 20-27, 2026. AAAI                    [55]  Raymond S Nickerson. 1998. Confirmation bias: A ubiquitous phenomenon in
+      Press, 31527–31535.                                                                                          many guises.Review of general psychology2, 2 (1998), 175–220.
+[32]  Bo Li,Mingda Wang,Gexiang Fang,Shikun Zhang, andWei Ye.2026. Retrieval                                [56]  AgadaJosephOche,AdemolaGloryFolashade,TirthankarGhosal,andArpan
+      as Generation: A Unified Framework with Self-Triggered Information Planning.                                 Biswas.2025. Asystematicreviewofkeyretrieval-augmentedgeneration(rag)
+      arXiv:2604.11407 [cs.CL]  https://arxiv.org/abs/2604.11407                                                   systems:Progress,gaps,andfuturedirections.arXiv preprint arXiv:2507.18910
+[33]  BoLi,MingdaWang,ShikunZhang,andWeiYe.2026. InstructionDataSelection                                          (2025).
+      via Answer Divergence.  arXiv:2604.10448 [cs.CL]  https://arxiv.org/abs/2604.                         [57]  LongOuyang,JeffreyWu,XuJiang,DiogoAlmeida,CarrollWainwright,Pamela
+      10448                                                                                                        Mishkin,Chong Zhang,Sandhini Agarwal,KatarinaSlama, AlexRay,et al.2022.
+[34]  Bo Li, Shikun Zhang, and Wei Ye. 2026. Data Selection for Multi-turn Dialogue                                Traininglanguagemodelstofollowinstructionswithhumanfeedback.Advances
+      Instruction Tuning. arXiv:2604.07892 [cs.CL]  https://arxiv.org/abs/2604.07892                               in neural information processing systems35 (2022), 27730–27744.
+[35]  Mengdi Li, Jiaye Lin, Xufeng Zhao, Wenhao Lu, Peilin Zhao, Stefan Wermter,                            [58]  Henry Papadatos and Rachel Freedman. 2024. Linear probe penalties reduce llm
+      andDiWang.2025. Curriculum-rlaif:Curriculumalignmentwithreinforcement                                        sycophancy.arXiv preprint arXiv:2412.00967(2024).
+      learning from ai feedback.arXiv preprint arXiv:2505.20075(2025).                                      [59]  Boci Peng, Yun Zhu, Yongchao Liu, Xiaohe Bo, Haizhou Shi, Chuntao Hong, Yan
+[36]  Xiping Li and Jianghong Ma. 2025. AIMCoT: Active Information-driven Mul-                                     Zhang,andSiliangTang.2025. Graphretrieval-augmentedgeneration:Asurvey.
+      timodal Chain-of-Thought for Vision-Language Reasoning.arXiv preprint                                        ACM Transactions on Information Systems44, 2 (2025), 1–52.
+      arXiv:2509.25699(2025).                                                                               [60]  PriyaPitre,NarenRamakrishnan,andXuanWang.2025. CONSENSAGENT:To-
+[37]  XipingLi,JianghongMa,KangzheLiu,ShanshanFeng,HaijunZhang,andYutong                                           wards efficient and effective consensus in multi-agent LLM interactions through
+      Wang.2024. Category-basedandpopularity-guidedvideogamerecommendation:                                        sycophancy mitigation. InFindings of the Association for Computational Linguis-
+      abalance-orientedframework.InProceedings of the ACM Web Conference 2024.                                     tics: ACL 2025. 22112–22133.
+      3734–3744.
+
+========== PDF PAGE 12 / 12 ==========
+SIGIR ’26, July 20–24, 2026, Melbourne, VIC, Australia                                                                                                                                                                             Peiyang Liu et al.
+
+
+[61]  GuozhiQiu,ZhiweiChen,ZixuLi,QinleiHuang,ZhihengFu,XuemengSong,and                                             generative model for large-scale recommendation systems.arXiv preprint
+      YupengHu.2026.MELT:ImproveComposedImageRetrievalviatheModification                                            arXiv:2508.15308(2025).
+      Frequentation-Rarity Balance Network. InICASSP 2026-2026 IEEE International                             [73]  Qianyun Yang, Zhiwei Chen, Yupeng Hu, Zixu Li, Zhiheng Fu, and Liqiang
+      Conference on Acoustics, Speech and Signal Processing (ICASSP). IEEE, 13007–                                  Nie. 2026. STABLE: Efficient Hybrid Nearest Neighbor Search via Magnitude-
+      13011.                                                                                                        Uniformity and Cardinality-Robustness.IEEE Transactions on Knowledge and
+[62]  Mrinank Sharma, Meg Tong, Tomasz Korbak, David Duvenaud, Amanda Askell,                                       Data Engineering(2026).
+      SamuelRBowman,NewtonCheng,Esin Durmus,ZacHatfield-Dodds,ScottR                                          [74]  Yuhan Yang, Jie Zou, Guojia An, Jiwei Wei, Yang Yang, and Heng Tao Shen.
+      Johnston, et al. 2023. Towardsunderstanding sycophancy in language models.                                    2026.  Unleashing the potential of neighbors: diffusion-based latent neighbor
+      arXiv preprint arXiv:2310.13548(2023).                                                                        generation for session-based recommendation. InProceedings of the 32nd ACM
+[63]  Marco Siino, Mariana Falco, Daniele Croce, and Paolo Rosso. 2025. Exploring                                   SIGKDD Conference on Knowledge Discovery and Data Mining V. 1. 1787–1796.
+      llms applications in law: A literature review on current legal nlp approaches.                          [75]  Ori Yoran, Tomer Wolfson, Ori Ram, and Jonathan Berant. 2023.   Making
+      IEEE Access(2025).                                                                                            retrieval-augmentedlanguagemodelsrobusttoirrelevantcontext.arXivpreprint
+[64]  WeihangSu,YichenTang,QingyaoAi,JunxiYan,ChangyueWang,Hongning                                                 arXiv:2310.01558(2023).
+      Wang, Ziyi Ye, Yujia Zhou,and Yiqun Liu. 2025. Parametric retrieval augmented                           [76]  Bo Yuan, Yulin Chen, Yin Zhang, and Wei Jiang. 2024. Hide and seek in noise
+      generation. InProceedings of the 48th International ACM SIGIR Conference on                                   labels: Noise-robust collaborative active learning with llms-powered assistance.
+      Research and Development in Information Retrieval. 1240–1250.                                                 InProceedings of the 62nd Annual Meeting of the Association for Computational
+[65]  Yuan Sun and Ting Wang. 2025. Be friendly, not friends: How llm sycophancy                                    Linguistics (Volume 1: Long Papers). 10977–11011.
+      shapes user trust.arXiv preprint arXiv:2502.10844(2025).                                                [77]  MingyuZhang,ZixuLi,ZhiweiChen,ZhihengFu,XiaoweiZhu,JiajiaNie,Yinwei
+[66]  Qwen Team. 2025. Qwen3 Technical Report. arXiv:2505.09388 [cs.CL]  https:                                     Wei, and Yupeng Hu. 2026.  Hint: Composed image retrieval with dual-path
+      //arxiv.org/abs/2505.09388                                                                                    compositional contextualized network. InICASSP 2026-2026 IEEE International
+[67]  AyushThakurandRashmiVashisth.2024. Loopsonretrievalaugmentedgenera-                                           Conference on Acoustics, Speech and Signal Processing (ICASSP). IEEE, 13002–
+      tion (lorag).arXiv preprint arXiv:2403.15450(2024).                                                           13006.
+[68]  Jingru Wang, Wen Ding, and Xiaotong Zhu. 2025. Financial analysis: Intelligent                          [78]  Qianchi Zhang, Hainan Zhang, Liang Pang, Yongxin Tong, Hongwei Zheng, and
+      financial dataanalysis system basedon llm-rag.arXiv preprint arXiv:2504.06279                                 ZhimingZheng.2026. Lessismore:Compactclueselectionforefficientretrieval-
+      (2025).                                                                                                       augmentedgenerationreasoning.InProceedingsoftheACMWebConference2026.
+[69]  XiaohuaWang,ZhenghuaWang,Xuan Gao, FeiranZhang,YixinWu,ZhiboXu,                                               1971–1982.
+      Tianyuan Shi, Zhengyuan Wang, Shizheng Li, Qi Qian, et al. 2024. Searching                              [79]  YuanjunZhang,FuzelAhamedShaik,SuvojitAcharjee,FahadKhalid,andMourad
+      for best practices in retrieval-augmented generation. InProceedings of the 2024                               Oussalah.2026.Towardsreliablemultimodaldisasterseverityassessmentthrough
+      Conference on Empirical Methods in Natural Language Processing. 17716–17736.                                  preferenceoptimizationandexplainablevision-languagereasoning.Reliability
+[70]  Jerry Wei, Da Huang, Yifeng Lu, Denny Zhou, and Quoc V Le. 2023.  Simple                                      Engineering & System Safety(2026), 112674.
+      synthetic data reduces sycophancy in large language models.arXiv preprint                               [80]  Penghao Zhao, Hailin Zhang, Qinhan Yu, Zhengren Wang, Yunteng Geng,
+      arXiv:2308.03958(2023).                                                                                       Fangcheng Fu, Ling Yang, Wentao Zhang, Jie Jiang, and Bin Cui.2026. Retrieval-
+[71]  Shangyu Wu, YingXiong, Yufei Cui, HaolunWu, Can Chen, Ye Yuan,Lianming                                        augmented generation for ai-generated content: A survey. Data Science and
+      Huang,XueLiu,Tei-WeiKuo,NanGuan,etal.2024. Retrieval-augmentedgener-                                          Engineering(2026), 1–29.
+      ation fornatural language processing:A survey.arXiv preprint arXiv:2407.13193                           [81]  Kaitlyn Zhou, Jena D Hwang, Xiang Ren, and Maarten Sap. 2024. Relying on the
+      (2024).                                                                                                       unreliable: The impact of language models’ reluctance to express uncertainty.
+[72]  Haibo Xing, Hao Deng, Yucheng Mao, Lingyu Mu, Jinxin Hu, Yi Xu, Hao Zhang,                                    arXiv preprint arXiv:2401.06730(2024).
+      JiahaoWang,ShizhunWang,YuZhang,etal.2025. Reg4rec:Reasoning-enhanced

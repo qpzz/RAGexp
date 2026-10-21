@@ -1,0 +1,1245 @@
+
+
+========== PDF PAGE 1 / 19 ==========
+    Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust
+                                         Retrieval-Augmented Generation
+
+
+
+
+   Jiashuo Sun1  Pengcheng Jiang1  Saizhuo Wang2  Jiajun Fan1  Heng Wang1  Siru Ouyang1  Ming Zhong1
+Yizhu Jiao1  Chengsong Huang3  Xueqiang Xu1  Pengrui Han1  Peiran Li4  Jiaxin Huang3  Ge Liu1  Heng Ji1
+                                                               Jiawei Han1
+
+                           Abstract
+
+
+
+     Retrieval-Augmented Generation (RAG) systems
+     remainbrittleunderrealisticretrievalnoise,even
+     when the required evidence appears in the top-
+     K    results.  A key reason is that retrievers and
+     rerankersoptimizesolelyforrelevance,oftense-
+     lecting either trivial, answer-revealing passages
+     orevidence thatlacksthecriticalinformationre-
+     quired to answer the question, without consid-
+     ering whether the evidence is suitable for the
+     generator.    We propose BAR-RAG, which re-
+     framesthererankerasaboundary-awareevidence
+     selector that targets the generator’s Goldilocks
+     Zone—evidencethatisneithertriviallyeasynor
+     fundamentally unanswerable for the generator,
+     but is challenging yet sufficient for inference
+     and thus provides the strongest learning signal.
+     BAR-RAGtrainstheselectorwithreinforcement
+     learning using generator feedback, and adopts                       Figure1.Comparisonbetween standardrelevance-based rerankers
+     a two-stage pipeline that fine-tunes the genera-                    and our boundary-aware evidence selection. Standard rerankers
+     tor under the induced evidence distribution to                      maximize relevance scores but overlook the generator’s weak-
+     mitigate the distribution mismatch between train-                   nesses,oftenencouragingshortcutlearningandbrittlereasoning
+                                                                         by prioritizing trivial or answer-revealing evidence. In contrast,
+     ing and inference.  Experiments on knowledge-                       ourmethodselectschallengingyetsolvableevidencebasedongen-
+     intensive question answering benchmarks show                        erator uncertainty, promoting robust reasoning and reducing the
+     thatBAR-RAG consistentlyimproves end-to-end                         mismatchbetween theevidence distributionsencountered during
+     performance under noisy retrieval, achieving an                     training and inference under noisy retrieval.
+     average gain of 10.3% over strong RAG and
+     reranking baselines while substantially improv-                     1. Introduction
+     ingrobustness. Thecodeisavaliableathttps:
+     //github.com/GasolSun36/BAR-RAG.                                    Retrieval-Augmented Generation (RAG) has achieved re-
+                                                                         markable success on knowledge-intensive tasks by ground-
+                                                                         ing large language model (LLM) outputs in retrieved evi-
+                                                                         dence(Lietal.,2025b;Jiangetal.,2025). YetRAGsystems
+                                                                         remain surprisingly brittle when retrieval results are noisy,
+   1University of Illinois Urbana-Champaign 2Hong Kong Uni-
+versity of Science and Technology 3Washington University in St.          partially relevant, or requires multi-step integration, even
+Louis 4TexasA&MUniversity. Correspondenceto: JiashuoSun                  whenthenecessaryfactsexistsomewhereinthetop-K   re-
+<jiashuo5@illinois.edu>.                                                 sults (Hsia et al.,2025;Yu et al.,2024;Cuconasu et al.,
+                                                                         2024). In such realistic settings, LLMs oftenfail to synthe-
+Preprint. February4,2026.                                                sizescatteredinformationandinsteadhallucinateplausible
+
+                                                                      1
+
+========== PDF PAGE 2 / 19 ==========
+          Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 2.Recall@5 and Recall@10 vs. QA Accuracy across different datasets. Higher retrieval recall does not guarantee higher QA
+accuracy. Our method narrows the gap between recall and accuracy.
+
+
+but incorrect answers. This fragility reveals a fundamental               unsolvable,butlienearthegenerator’suncertaintyboundary.
+limitation: retrievers are optimized for relevance, not for               Weoperationalizethisobjectiveviaatwo-stagereinforce-
+providing evidence that maximallystrengthens the genera-                  ment learning pipeline: we firsttrain the selector to explore
+tor’s reasoning.                                                          diversedocumentcombinations,guidedbyrewardsbased
+Currentretrieversoptimizeexclusivelyforquery-document                     on generator uncertainty and task success, while keeping
+relevance(Wangetal.,2022;Zhangetal.,2025), creating                       thegeneratorfixed;wethenfreezetheselectorandfine-tune
+two systematic failure modes: they prefer trivial, answer-                thegeneratorontheinducedevidencedistribution,ensuring
+revealing passages that encourage shortcut learning, and                  robustness under noisy retrieval.
+theycannotdistinguishgenuinelyunsolvableevidencefrom                      We evaluate BAR-RAG on a diverse set of knowledge-
+challenging yet sufficient evidence—precisely the kind that               intensive question answering benchmarks under realistic
+best strengthens generator reasoning.  Crucially, existing                retrieval settings. Our results demonstrate that boundary-
+retrieversoperate withoutany estimationof thegenerator’s                  awareevidenceselectionconsistentlyimprovesend-to-end
+competence, creating a severe train–test mismatch: systems                QA performance, yields a significant performance gain of
+trained oncurated evidenceface noisy, incomplete retrieval                anaverage10.3%overbaselinemodels. Beyondaccuracy
+at deployment, leading tosubstantial performance degrada-                 gains, we show thatBAR-RAG reshapes the evidence diffi-
+tion (Sun et al.,2025;Yu et al.,2024).  Empirically, this                 cultydistributiontowardthegenerator’scompetence bound-
+manifests as a persistent gap between retrieval recall and                ary, leadingtomoreeffectivelearningsignalsandsubstan-
+end-to-end QA accuracy (Figure2).                                         tially improved robustness compared to relevance-based
+To overcome this limitation,  we revisit the role of the                  retrieval and reranking baselines.
+rerankerinRAGsystems. Ratherthantreatingitasapassive
+relevancescorer,weviewthererankerasanactiveevidence                       2. Method
+setselector,responsibleforchoosingcombinationsofdoc-                      2.1. Overview
+umentswhosejointstructurebestsupportsthegenerator’s
+learning and reasoning. Figure1contrasts this paradigm                    Ourapproachconsistsofatwo-stagereinforcementlearning
+with standard relevance-based reranking.  Crucially, evi-                 pipeline(Figure3). InStage1,wetrainaselectortoiden-
+dencesetswithsimilarrelevancecaninducedrasticallydif-                     tifyevidencesetsthatliewithinthegenerator’s“Goldilocks
+ferentlearningsignals: overlyexplicitevidenceencourages                   Zone”—challenging enough to require genuine reasoning,
+shortcutlearning,whileincompleteevidenceisfundamen-                       yet solvable given the generator’s current competence. In
+tallyunlearnable. Incontrast,evidencethatischallenging                    Stage2,wefreezetheselectorandfine-tunethegenerator
+yet sufficient for inference forces the generator to integrate            undertheinducedevidencedistribution,therebyclosingthe
+information and resolve uncertainty.                                      train–testgapthatplaguesstandardRAGsystems. Wede-
+Building  on  this  perspective,  we  propose  BAR-RAG,                   scribe each stage below, and introduce an iterative training
+whichinstantiatesthereranker-as-selectorparadigmthrough                   schemethatprogressivelyrefinesevidenceselectiontobet-
+boundary-aware evidence design.  Rather than maximiz-                     termatchthegenerator’sevolvingcompetence. Wedescribe
+ing relevance,BAR-RAG explicitly targets the generator’s                  each stage below.
+Goldilocks Zone—evidence sets that are neither trivial nor
+
+
+                                                                       2
+
+========== PDF PAGE 3 / 19 ==========
+           Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 3.Overview of the   BAR-RAG training and inference pipeline. During training, we adopt a two-stage framework: (Stage 1) a
+selectoristrainedwithreinforcementlearningusingrelevanceanduncertaintyrewardstoidentifychallengingyetsolvableevidencesets,
+and (Stage 2) the generator is optimized under the induced evidence distribution using accuracy, formatting, and citation rewards. At
+inference time, the trained generator answers questions using retrieved documents, producing robust and high-quality answers.
+
+
+2.2. Problem Setup                                                            The filtering is applied only during selector training to im-
+Letπ r denotetheselectorpolicyandπ g thegeneratorpol-                         prove reward signal quality; all queries are retained during
+icy.  Given a query q, let C={c         1,...,cn} be the top-n                evaluation. Full details are provided in AppendixA.6.
+candidate documents returned by an initial retriever (e.g.,                   2.3. Stage 1: Boundary-aware Selector Training
+BM25(Robertson&Zaragoza,2009)oradenseretriever).
+The selector choosesa subsetS={c        i1,...,cik}⊆C      with               Standardrerankersoptimizeforrelevancealone,oftensur-
+k <n    ,andthegeneratorproducesananswera conditioned                         facing answer-revealing passages that encourage shortcut
+on(q,S).                                                                      learning. Incontrast,wetraintheselectortotargetthegen-
+Our goal is twofold.  First, we train the selector policy                     erator’scompetenceboundary—theregionwhereevidence
+π r  to select evidence sets that maximize the generator’s                    isneithertriviallyeasy(ˆp≈1       )norimpossiblyhard(ˆp≈0       ),
+reasoning performance, not by providing trivial shortcuts,                    but lies near a target difficulty level.
+but by identifying evidence that is challenging yet solvable.
+Second, we train the generator policyπ g to produce high-                     The Goldilocks Zone.Let          ˆp(S)          denote the empirical
+quality,accurateanswersconditionedontheevidencesets                           probability that the generator answers correctly given ev-
+selected by π r, enabling robust reasoning under realistic                    idence setS . We define the Goldilocks Zone as evidence
+and challenging retrieval.                                                    setssatisfying ˆp(S)≈c             ,wherec∈(0,1)           isatargetcorrect-
+                                                                              ness rate (e.g.,c=0.5       ). Intuitively, suchevidence sets are:
+Training-time Filtering.   To ensure informative reinforce-                   (1)Solvable: The generator can produce correct answers
+mentlearning signalsfor selectoroptimization, weapplya                        with non-negligible probability, indicating that sufficient
+lightweighttraining-time filteringstepthatremovesqueries                      information is present.
+thatareeithertriviallysolvableorfundamentallyunanswer-                        (2)Non-trivial: The generator does not succeed determin-
+ableundertheretrieveddocumentpool. Thekeyintuition                            istically, suggesting that reasoning is required rather than
+is that selector learning relies on variance in generator out-                simple pattern matching.
+comes: queries thatare always answered correctly provide
+no incentive for evidence selection, while queries that are                   By targeting this zone, we encourage the selector to find
+consistently unsolvable yield uniformly low rewards regard-                   evidencecombinationsthatdemandgenuinemulti-steprea-
+less of the selected evidence. We characterize trivial and                    soning while remaining within the generator’s capability.
+unanswerable instances based on the empirical behavior of
+the generator over multiple rollouts given retrieved docu-                    Selectorsampling.  Foreachquery q, wesampleM    can-
+ments,using correctnessstatistics asaproxy forsolvability.                    didate evidence sets from the selector:
+This design makes the filtering procedure domain-agnostic
+andinexpensive,asitdependsonlyongeneratorfeedback
+ratherthantask-specificheuristicsoradditionalsupervision.                                 S (m)    ∼π    r(·|q,C),    m=1,...,M.          (1)
+
+                                                                          3
+
+========== PDF PAGE 4 / 19 ==========
+            Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+Each evidence setS (m)     is then evaluated using the frozen                       Thisdesignensuresthatmalformedselectoroutputsreceive
+generatorπ                g.                                                        zero reward, while relative trade-offs amongboundary tar-
+                                                                                    geting,relevance,anddocumentcountareonlyconsidered
+Generator rollouts.Foreach evidenceset           S , wesample                       for valid evidence sets.
+Kanswers from the generator:                                                        (4) Count penaltyP cnt (S)    .To encourage the selector to
+              a (k)   ∼π    g(·|q,S),    k=1,...,K.            (2)                  outputatargetnumberofdocumentsk∗,weapplyapenalty
+                                                                                    proportional to the deviation:
+Each  answer  must  follow  a  prescribed  format  (e.g.,
+<answer>...</answer>). We define the rollout cor-                                               P cnt (S)=min(α·||S|−k                  ∗|, P  max   ),         (9)
+rectness indicator based on the generator’s final reward                            where α  is the penalty per document deviation and P max
+R g(·)    (defined in Section2.4).  Specifically, a rollout is                      caps the maximum penalty.
+considered correct if its reward exceeds a thresholdδ:
+                                h                     i                             Finalreward.Wecombinetherewardcomponentsusing
+                     z (k)    =I  R g   a (k)   ≥δ      .                   (3)     the format indicator as a gate:
+
+We then estimate the empirical correctness probability as:
+                                                                                    R r(S)=R          fmt  (S)·λ bdy   R  bdy  (S)+λ           rel R  rel (S)−P           cnt (S),
+                                          KX                                                                                                                 (10)
+                         ˆp(S)=           1K  z (k)   .                         (4) where λ bdy  ,λ rel  ≥0     control the relative importance of
+                                         k=1                                        targeting the competence boundary versus maintaining rele-
+Reward design.We design four reward components that                                 vance.
+together guide the selector toward the Goldilocks Zone                              Optimization.WeoptimizetheselectorusingGroupRel-
+while maintaining relevance and output quality.                                     ative Policy Optimization (GRPO) (Shao et al.,2024). For
+(1) Boundary rewardR  bdy  (S)    .This reward encourages                           eachgroup ofsampled evidencesets{S          (m)   }Mm=1     , wecom-
+evidence sets near the target correctness c.  We adopt a                            pute group-normalized advantages:
+triangular function that peaks at ˆp(S) =c             and decreases
+linearly as the evidence becomes too easy or too hard:                                                    A  (m)     =   R r(S   (m)    )−µ
+                                      ˆp(S)                                                                                 σ+ϵ           ,                   (11)
+               R  bdy(S)=min              c   ,1−ˆp(S)1−c                 (5)       whereµ  andσ  are the mean and standard deviation of re-
+To estimate ˆp(S)        , we use the rollout-based definition in the               wardswithin thegroup. The selectoristrained tominimize:
+Generator rollouts paragraph with threshold δ.  A rollout                                                   h
+is deemed correct if its generator rewardR g(a)     (defined in                        L r(θ  r)=−E        m  min     r(m)   A  (m)    ,
+Section2.4) exceeds a thresholdδ:                                                                              clip(r         (m)    ,1−ϵ,1+ϵ)A                    (m)   i,  (12)
+
+                                 KX    h                  i
+                ˆp(S)=           1K  I  R g(a  (k)   )≥δ    .              (6)      where r(m)     =π    r(S   (m)    |q,C)/π         oldr   (S   (m)    |q,C)      is the
+                               k=1                                                  likelihood ratio.
+
+(2) Relevance reward R  rel (S)    . We define the relevance                        2.4. Stage 2: Generator Fine-tuning
+reward as the average retrieval score (in the initial retrieval
+phrase) of the selected documents,                                                  Standard RAG pipelines train generators on curated, near-
+                                      X                                             perfectevidencebutdeploythemwithnoisyretrieval,lead-
+                 R  rel (S)=        1|S|    score(q,c           i),               (7)ing to a mismatch and performance degradation. By fine-
+                                      ci∈S                                          tuningthegeneratorundertheselector’soutputdistribution,
+                                                                                    weexposeittorealistic,challengingevidenceduring train-
+and rescale it to(0,1)for stability.                                                ing.
+(3) Format reward R  fmt  (S)    .We define a binary format
+indicator that checks whether the selector output is well-                          Trainingprocedure. Foreachquery   q,thefrozenselector
+formed (e.g., valid document indices, no duplicates, and                            produces an evidence set S=π      r(q,C)     .  The generator
+proper structure):                                                                  samplesKcandidate answers:
+
+                 R  fmt  (S)=I    Sis well-formed .               (8)                           a (k)   ∼π    g(·|q,S),    k=1,...,K.          (13)
+
+                                                                                4
+
+========== PDF PAGE 5 / 19 ==========
+                             Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+                Table1. BAR-RAGconsistentlyimprovesperformanceacrossmodelsandQAbenchmarks.Exactmatch(EM)resultsongeneralQA
+                and multi-hop QA tasks for three backbone models. All values are reported as absolute scores. For IRCoT, RAG w/ Reranker, RAG SFT,
+                andBAR-RAG, cellshading indicates improvement(                   blue ) ordegradation (      red ) relative to the RAG baseline. BAR-RAGyields strong
+                and consistent gains across both single-hop and multi-hop settings, surpassing standard RAG pipelines and reranking-based baselines.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                Generator Reward Design.We design a composite re-                                     whereG  isthesetofgoldanswers, andβ 1,β 2 ≥0    control
+                wardthatencouragesbothansweraccuracyandproperevi-                                     the relative importance of partial credit (F1) versus exact
+                dence attribution.                                                                    correctness (EM).
+                (1) Format reward.The generator must produce outputs                                  (3)CitationrewardR  cite (a)    .Toencouragethegenerator
+                in the prescribed format (i.e., valid<answer> tags). If theGeneralQA                                        Multi-HopQAtoground itsreasoning intheprovided evidence, wereward
+Method                   NQ    TriviaQA    PopQA    HotpotQA    2Wiki.    MuSiQue    Bamboogle    Avg.format check fails, the reward is set to zero:appropriate citation behavior in the<think> block. Let
+                                                     Qwen-2.5-3B-Instruct                             n cite  denote thenumber of unique documentscited. Weuse
+                                  R g(a)=0  if format is invalid.              (14)                   a peaked reward centered at a target citation countn        ∗:
+DirectInference       10.6        28.8           10.8           14.9           24.4           2.0                2.4           13.41.0,  ifn           cite  =n   ∗,
+CoT                         2.3          3.2             0.5             2.1             2.1            0.2                0.0           1.5(2) Accuracy reward R  acc (a)    .For well-formed outputs,
+RAG                       34.8        54.4           38.7           25.5           22.6           4.7                8.0           27.0wecomputeaweightedcombinationoftoken-levelF1scoreR  cite (a)=0.5,  if|n            cite −n   ∗|=1,(16)
+IRCoT           and exact match (EM) against the gold answers:11.131.220.016.4      17.1           6.7             24.0          18.10.0,  otherwise.
+RAGw/Reranker             35.6        55.3           39.6            26.7           23.4           4.9Thisencourages thegeneratortocite amoderatenumber of10.428.0
+RAGSFT            R  acc (a)=β         1 ·maxg∈G    F 1(a,g)+β          2 ·maxg∈G    EM(a,g),(15)38.958.141.428.925.96.413.5     30.4
+BAR-RAG(1Iter)            40.1        58.4           41.2            31.0           24.9           6.3sourcesfromtheprovideddocuments,sufficienttosupport24.032.3
+BAR-RAG(2Iter)            41.5        61.3           43.4            33.2           26.4           7.4             26.3          34.3
+BAR-RAG(3Iter)            42.0        59.7           44.1            32.6           26.7          57.2             26.8          34.2
+                                                     Qwen-2.5-7B-Instruct
+DirectInference       13.4        40.8           14.0           18.3           12.6           3.1               12.0          16.3
+CoT                         4.8         18.5            5.4             9.2            10.8           2.2               23.2          10.6
+RAG                       39.3        53.7           26.7           28.9           18.9           4.7               16.0          26.9
+IRCoT                     22.4        47.8           30.1            13.3           14.9           7.2             22.4          22.6
+RAGw/Reranker             40.5        55.3           27.3            28.1           20.4           5.5             18.7          28.0
+RAGSFT                    42.7        58.6           32.3            32.4           22.6           6.8             27.1          31.8
+BAR-RAG(1Iter)            44.7        63.2           44.1            37.2           28.3           8.3             36.7          37.2
+BAR-RAG(2Iter)            46.1        64.3           46.3            38.1           29.9           9.1             39.1          38.8
+BAR-RAG(3Iter)            46.9        64.5           46.9            38.8           29.8           9.1             39.6          39.1
+                                                   LLaMA-3.1-8B-Instruct
+DirectInference       18.4        36.5           19.8           12.5           23.0           2.7                8.8           17.4
+CoT                        27.8        54.1           23.5           24.1           23.0           6.8               16.3          25.1
+RAG                       42.7        58.2           28.9           30.3           19.4           6.3               17.6          29.1
+IRCoT                     23.5        48.1           31.2            12.2           11.8           6.9             24.5          22.6
+RAGw/Reranker             43.6        60.1           30.4            32.5           23.6           7.6             19.5          31.0
+RAGSFT                    45.8        63.4           35.6            35.9           27.4           8.9             24.3          34.5
+BAR-RAG(1Iter)            47.5        65.9           45.8            39.5           31.4          11.1             30.4          38.8
+BAR-RAG(2Iter)            49.0        67.7           48.0            40.5           33.0          12.5             32.8          40.5
+BAR-RAG(3Iter)            49.5        67.3           48.6            41.2           33.0          12.0             33.3          40.7
+
+========== PDF PAGE 6 / 19 ==========
+                          Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+                        Table2.Ablation study on different components.                        additional inference cost and preserves the standard RAG
+                                                                                              pipeline. By being trained iteratively on adversarially se-
+                                                                                              lectedevidencenearitscompetenceboundary,thegenerator
+                                                                                              becomes more robust to noisy, incomplete, and imperfect
+                                                                                              retrieval results encountered at test time.
+
+                                                                                              3. Experiments
+                                                                                              3.1. Datasets and Evaluation Metrics
+                                                                                              We evaluate on seven knowledge-intensive QA datasets
+                                                                                              spanning diverse reasoning challenges. Forsingle-hop QA,
+                                                                                              weuseNaturalQuestions(NQ)(Kwiatkowskietal.,2019),
+                                                                                              TriviaQA (Joshi et al.,2017), and PopQA (Mallen et al.,
+               multi-hop reasoning but not so many as to dilute focus.                        2023),which testrobustness toretrievalnoise, paraphrased
+                                                                                              evidence, and long-tail entity reasoning, respectively. For
+               Final reward.We combine the three components with                              multi-hop QA, we use HotpotQA (2-hop bridge reasoning)
+               independent weights for accuracy and citation, while fixing                    (Yangetal.,2018),2WikiMultiHopQA(distantsupporting
+               the format coefficient:                                                        facts)(Hoet al.,2020),MuSiQue(3–5 compositionalhops)
+                                                                                              (Trivedi et al.,2022), and Bamboogle (indirect reasoning)
+                R g(a)=R          fmt  (a)·    λ acc  R  acc (a)+λ         cite  R  cite (a)  ,(17)(Press et al.,2023).  The training datasets are reported at
+              whereλ            acc ,λ cite  ≥0are hyperparameters.                           AppendixA.7. WereportExactMatch(EM)astheprimary
+                                                                                              metric, following standard evaluation protocols.
+
+               Optimization.The generator is optimized using GRPO                             3.2. Baselines
+              with the same clipped objective:
+                                     h                                                        We compare against two categories of methods.Without
+                  L g(θ  g)=−E        kmin     r(k)  A  (k)   ,                               retrieval: (1)DirectInference,promptingthebasemodel
+                                                                                              directly; (2) Chain-of-Thought (CoT) (Wei et al.,2022),
+                                          clip(r         (k)   ,1−ϵ,1+ϵ)A                    (k)   i,  (18)eliciting step-by-stepreasoning; (3) RAG SFT,supervised
+                                                                                              fine-tuningonQApairswithretrievedevidence.Withre-
+              where  advantages A  (k)     are  computed  from  generator                     trieval: (1)RAG (Shietal.,2024),standarddenseretrieval-
+               rewards  within  each  group,  and  r(k)      =  π    g(a  (k)     |           augmented generation; (2) RAG w/ Reranker, adding a neu-
+               q,S)/π       oldg   (a  (k)   |q,S).                                           ral reranker to re-score retrieved documents before gener-
+                                                                                              ation; (3) IRCoT (Trivedi et al.,2023), a multi-step QA
+               Iterative two-stage training.  Rather than a single pass,                      framework that interleaves retrieval with steps in a CoT;
+              we alternate between the two stages for T   iterations.  At                     (4) RAG SFT, fine-tuning on QA pairs augmented with
+               iterationt,we(i)traintheselectorπ (t)r    againstafrozengen-                   top-5 retrieved passages, exposing the model to both rele-
+               eratorπ (t−1)g        totargetthecurrentcompetenceboundary,and                 vant and noisy evidence during training. All baselines use
+               then (ii) freeze the updated selector and fine-tune the gener-                 thesamebasemodel(Qwen2.5-3B-Instruct,Qwen2.5-7B-
+               atortoobtainπ (t)g    undertheinducedevidencedistribution.                     Instruct(Qwen et al.,2025) andLLaMA-3.1-8B-Instruct
+               In practice,each iteration consists of oneepoch of selector                    (Grattafiorietal.,2024)),retriever(E5-base-v2(Wangetal.,
+               training followed by one epoch of generator fine-tuning.                       2022))andreranker (Qwen-3-Embedding-8B(Zhangetal.,
+              This alternating procedure progressively refines evidence                       2025)) and Top-5 retrieved documents as input for fair com-
+               selectiontotrackthegenerator’sevolvingcompetence. Al-                          parison.
+               gorithmic details are provided in Appendix1.                                   3.3. Implementation Details
+
+               2.5. Inference                                                                 We use instruction-tuned LLMs as both the selector and
+              The selector is used only during training to shape a chal-                      generatorbackbones,includingQwen2.5andLLaMA-3.1
+               lengingevidencedistributionforthegenerator. Atinference                        variants.  Detailed model configurations, reward parame-
+               time, we discard the selector entirely and apply the fine-                     ters,rolloutsettings,andtrainingschedulesareprovidedin
+               tuned generator directly to thetop-k  documents returned by                    AppendixA.5.
+               a standard retriever (e.g., BM25 or a dense retriever), pro-
+               ducingthefinalanswera=π      g(q,S)    . Thisdesignincursno
+Method            NQ     PopQA    HotpotQA    Avg.                                         6
+Full                  46.9       46.9            38.8          44.2
+w/oFiltering    42.6       32.1            32.3          35.6
+w/oStage1       42.1       42.5            41.9          42.2
+w/oStage2       39.7       34.1            36.7          36.8
+Selector
+   w/oR        bdy        43.4       43.6            33.5          40.2
+   w/oR        rel        46.1       46.3            38.1          43.5
+Generator
+   w/oR        cite       45.3       44.8            37.9          42.7
+
+========== PDF PAGE 7 / 19 ==========
+           Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 4.Top-  K   accuracy curves on four QA benchmarks for two base models:Qwen-2.5-7B-InstructandLLaMA-3.1-8B-Instruct.
+From left to right, columns correspond toNQ,TriviaQA,PopQA, andHotpotQA. Across both models and all datasets, our method
+consistently achieves higher accuracy in low-K   regimes and remains robust asK   increases, whereas standard RAG exhibits weaker
+scaling behavior and higher sensitivity to retrieval noise.
+
+
+3.4. Main Results                                                           Effect of Reward Components.To examine the contri-
+Table1presents our main results across seven QA bench-                      bution of individual reward terms in the selector, we ablate
+marks. BAR-RAG consistently outperforms all baselines on                    two key components: the boundary reward R  bdy    and the
+bothgeneralandmulti-hopQAtasks. UsingQwen2.5-7B-                            relevance rewardR  rel , while keeping other training settings
+Instructas a representative example,           BAR-RAG achieves             unchanged. Specifically,weevaluatevariantsthatremove
+substantial improvements over the strongest baseline RAG                    R  bdy   orR  rel  from the selector training objective. Results
+SFTonsingle-hopbenchmarks: +8.5onNQ(51.2vs.42.7),                           are reported in Table2.  Removing the boundary reward
++5.9 on TriviaQA, and +14.6 on PopQA. The advantages                        leads to aclear performance degradationacross all datasets,
+aremorepronouncedonmulti-hoptasks,withgainsof+6.4                           confirmingthattargetingevidencenearthegenerator’scom-
+on HotpotQA, +7.2 on 2WikiMultiHopQA, and +12.5 on                          petenceboundaryiscrucialforrobustreasoning. Incontrast,
+Bamboogle—thelatterhighlightingthebenefitoftraining                         removingtherelevancerewardresultsinamilderbutconsis-
+onevidencethatdemandsgenuinemulti-stepreasoning. Re-                        tent drop, indicating its complementary role in maintaining
+sultsonLLaMA-3.1-8B-InstructandQwen2.5-3B-Instruct                          evidencequality. WefurtherablatethecitationrewardR  cite
+confirm that our approach generalizes across model fami-                    used in generator fine-tuning.  RemovingR  cite   results in
+lies, achieving average EM of 40.7 and 34.2 respectively                    a consistent but smaller performance drop, indicating that
+(vs. 29.1 and 27.0 for RAG).                                                citation supervision complements competence-aware evi-
+                                                                            dence selection by improving answer grounding rather than
+                                                                            driving the main gains.
+Iterative ImprovementWe examine how performance                             EffectofTwo-StageTraining.  Ourpipelineconsistsof
+evolves across training iterations.  As shown in Table1,                    two stages: selector training (Stage 1) followed by gener-
+all three models exhibit consistent improvement from Iter                   ator fine-tuning (Stage 2). To assess the necessity of each
+1 to Iter 2, with diminishing gains from Iter 2 to Iter 3.                  component,weconductablationstudiessummarizedinTa-
+Thispatternsuggeststhattheiterativeco-trainingprocedure                     ble2. WhenStage2isremoved,theselectoristrainedwhile
+converges toward a stable solution within a few iterations,                 keeping the generator frozen at its initial state. This variant
+and that the majority of gains are captured in the first two                leads to a clear performance drop across all benchmarks,
+rounds of selector-generator co-adaptation.                                 indicating that adapting the generator to the competence-
+
+3.5. Ablation Studies                                                       boundary evidence distribution is crucial for effective rea-
+                                                                            soning.  We further examine the role of the training-time
+We conduct ablation studies to validate the necessity of key                filtering step by removing it and training the selector on
+design choices, including (i) the design of reward compo-                   thefulldataset. Eliminatingfilteringconsistentlydegrades
+nents for boundary-aware evidence selection and (ii) the                    performance,withparticularlylargedropsonPopQAand
+two-stage training pipeline.                                                HotpotQA, confirming that trivially solvable and unanswer-
+
+                                                                        7
+
+========== PDF PAGE 8 / 19 ==========
+          Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 5.Distribution shift of evidence difficulty (  ˆp  ) across different retrieval methods. Our method concentrates samples toward the
+target correctness levelc=0.5, substantially reducing extreme cases near 0 (unsolvable) and 1 (trivially solvable).
+
+
+able queries introduce degenerate RL signals that hinder                   concentrates probability mass around the targetcorrectness
+stable selector optimization.   Finally, removing Stage 1                  levelc= 0.5       . This consistent shift across generators indi-
+eliminatescompetence-awareevidenceselectionaltogether,                     cates that BAR-RAG actively promotes hard-but-solvable
+reducingthe pipelineto standardretrievalfollowed bygen-                    evidence near the generator’s competence boundary rather
+erator training. The resulting degradation demonstrates that               than merely improving relevance.
+naiveretrievalisinsufficientforrobustmulti-hopreasoning.                   Additional analyses,  including counterfactual evidence-
+3.6. Analysis                                                              dependence studies and comparisons with agentic RAG
+                                                                           methods, are provided in AppendixA.3andA.2.
+GeneratorRobustnesstoEvidenceQuality.  Acentral
+claim of our approach is that training on competence-                      4. Related Work
+boundaryevidenceyieldsageneratorthatisinherentlymore
+robust to evidence quality—even when the selector is dis-                  Retrieval-Augmented GenerationRetrieval-Augmented
+carded at inference time. To verify this, we evaluate gen-                 Generation (RAG) improves factual accuracy by ground-
+erators trained with BAR-RAG, and standard RAG, using                      inglanguagemodeloutputsinexternalknowledgesources
+the same naive retriever outputs (top-k  by retrieval score)               (Lewisetal.,2020;Guuetal.,2020). Recentworkexplores
+under varying evidence budgets k∈ {1,3,5,10,15,30}                             .tighter retrieval–generation integration, including mecha-
+We conduct this evaluation across two backbone models                      nisms that adapt retrieval behavior based on model uncer-
+(Qwen-2.5-7B-InstructandLLaMA-3.1-8B-Instruct) and                         taintyorself-reflection,suchasSelf-RAG(Asaietal.,2024).
+fourdatasets (NQ,TriviaQA, PopQA,andHotpotQA). Fig-                        However,BAR-RAGtargetswhatevidencetoretrieve,fram-
+ure4reportsK-accuracycurvesforallsettings. Consistent                      ingevidenceselectionas acompetence-awareprocess that
+with our hypothesis,BAR-RAG-trained generators consis-                     deliberately selects hard-but-solvable contexts to strengthen
+tently outperform baselines across all k , with the largest                the generator’s reasoning ability.
+gainsappearinginlow-k  regimeswhereevidenceissparse
+and reasoning robustness is most critical.
+
+Evidence Difficulty Distribution Shift.For each ques-                      DocumentRerankingRerankingrefinesretrievedcandi-
+tion, we estimate the empirical solvability ˆp(S)         of an ev-        datesbeforedownstreamgeneration,withearly neuralap-
+idence set S   via K    generator rollouts, and compare the                proaches relying on cross-encoder architectures to compute
+resulting distributions across three methods: Naive RAG                    relevance scores (Nogueira & Cho,2019). More recently,
+(selecting top-k  documents by retrieval score), RAG with                  reinforcementlearninghasbeenusedtooptimizereranking
+a neural reranker, and our BAR-RAG selector.  Figure5                      policies via generator feedback, as in DynamicRAG (Sun
+compares the resulting distributions across Naive RAG,                     et al.,2025). In contrast to prior RL-based rerankers that
+RAG with a neural reranker, and our BAR-RAG selector                       optimize relevance oranswer quality,BAR-RAG introduces
+forbothQwen-2.5-7B-InstructandLLaMA-3.1-8B-Instruct.                       anexplicitcompetenceboundaryrewardthatdirectlymod-
+WhileNaiveRAGandreranker-basedRAGexhibitbimodal                            elsevidencedifficulty,enablingtheselectionofchallenging
+distributions dominated by unsolvable or trivially answer-                 yet solvable evidence sets.
+revealingcontexts,BAR-RAGsuppressesbothextremesand                         Further extand related works are reported in AppendixA.4.
+
+                                                                        8
+
+========== PDF PAGE 9 / 19 ==========
+          Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+5. Conclusion                                                         Ho,X.,DuongNguyen,A.-K.,Sugawara,S.,andAizawa,
+We presented BAR-RAG, a boundary-aware evidence se-                      A.   Constructing a multi-hop QA dataset for compre-
+lectiontraining frameworkthat trainstheselector totarget                 hensive evaluation of reasoning steps.    In Scott,  D.,
+hard-but-solvableevidencenearthegenerator’scompetence                    Bel, N., and Zong, C. (eds.),Proceedings of the 28th
+boundary. We train generator with realistic retrieval con-               International  Conference  on  Computational  Linguis-
+ditions,yieldingconsistentrobustnessgainsacrossdiverse                   tics,  pp. 6609–6625,  Barcelona,  Spain (Online),  De-
+QA benchmarks without additional inference-time cost.                    cember  2020.  International  Committee  on  Computa-
+                                                                         tional Linguistics. doi: 10.18653/v1/2020.coling-main.
+                                                                         580.  URL https://aclanthology.org/2020.
+References                                                               coling-main.580/.
+Asai, A., Wu, Z., Wang, Y., Sil, A., and Hajishirzi, H. Self-         Hsia, J., Shaikh, A., Wang, Z., and Neubig, G.  Ragged:
+  rag: Learning to retrieve,generate,andcritiquethrough                  Towards informed design of scalable and stable rag
+  self-reflection. InTheTwelfthInternationalConference                   systems, 2025.   URL https://arxiv.org/abs/
+  onLearningRepresentations,ICLR2024,Vienna,Austria,                     2403.09040.
+  May 7-11, 2024. OpenReview.net, 2024. URL       https:              Jiang, P., Lin,J., Shi,Z., Wang, Z.,He, L.,Wu,Y., Zhong,
+  //openreview.net/forum?id=hSyW5go0v8.                                  M., Song, P., Zhang, Q., Wang, H., et al. Adaptation of
+
+Cao, W., Wang, J., Zheng, Y., Bao, L., Zheng, Q., Berg-                  agentic ai.arXivpreprintarXiv:2512.16301, 2025.
+  Kirkpatrick, T., Paturi, R., and Bergen, L.  Single-pass            Jin,  B.,  Zeng,  H.,  Yue,  Z.,  Wang,  D.,  Zamani,  H.,
+  documentscanningforquestionanswering,2025. URL                         and Han, J.   Search-r1:  Training llms to reason and
+  https://arxiv.org/abs/2504.03101.                                      leverage search engines with reinforcement learning.
+
+Cao, Z., Qin, T., Liu, T., Tsai, M., and Li, H.   Learn-                 CoRR, abs/2503.09516, 2025.  doi:  10.48550/ARXIV.
+  ing to rank:   from pairwise approach to listwise ap-                  2503.09516. URLhttps://doi.org/10.48550/
+  proach.   In Ghahramani, Z. (ed.),Machine Learning,                    arXiv.2503.09516.
+  Proceedings of the Twenty-Fourth International Con-                 Joshi, M., Choi, E., Weld, D., and Zettlemoyer, L.  Trivi-
+  ference (ICML 2007), Corvallis, Oregon, USA, June                      aQA:Alargescaledistantlysupervisedchallengedataset
+  20-24, 2007, volume 227 ofACM International Con-                       for reading comprehension.   In Barzilay, R. and Kan,
+  ference Proceeding Series, pp. 129–136. ACM, 2007.                     M.-Y. (eds.),Proceedings of the 55th Annual Meet-
+  doi: 10.1145/1273496.1273513. URLhttps://doi.                          ing of the Association for Computational Linguistics
+  org/10.1145/1273496.1273513.                                          (Volume 1: Long Papers), pp. 1601–1611, Vancouver,
+Cuconasu,F.,Trappolini,G.,Siciliano,F.,Filice,S., Cam-                   Canada, July 2017. Association for Computational Lin-
+  pagnano, C., Maarek, Y., Tonellotto, N., and Silvestri,                guistics.   doi:  10.18653/v1/P17-1147.   URL https:
+  F.  The power of noise: Redefining retrieval for RAG                   //aclanthology.org/P17-1147/.
+  systems. In Yang, G. H., Wang, H., Han, S., Hauff, C.,              Karpukhin,  V.,  Oguz,  B.,  Min,  S.,  Lewis,  P.,  Wu,  L.,
+  Zuccon,G.,andZhang,Y.(eds.),Proceedingsofthe47th                       Edunov, S., Chen, D., and Yih, W.  Dense passage re-
+  InternationalACMSIGIRConferenceonResearchand                           trievalforopen-domainquestionanswering. InWebber,
+  DevelopmentinInformationRetrieval,SIGIR2024,Wash-                      B., Cohn, T., He, Y., and Liu, Y. (eds.),Proceedings of
+  ingtonDC,USA,July14-18,2024, pp.719–729.ACM,                           the 2020 Conference on Empirical Methods in Natural
+  2024.  doi: 10.1145/3626772.3657834.  URL https:                       Language Processing, EMNLP 2020, Online, Novem-
+  //doi.org/10.1145/3626772.3657834.                                     ber 16-20, 2020, pp. 6769–6781. Association for Com-
+
+Drozdov,A.,Zhuang,H.,Dai,Z.,Qin,Z.,Rahimi,R.,Wang,                       putational Linguistics, 2020.  doi:  10.18653/V1/2020.
+  X.,Alon,D.,Iyyer,M.,McCallum,A.,Metzler,D.,and                         EMNLP-MAIN.550.  URL https://doi.org/10.
+  Hui, K. Parade: Passage ranking using demonstrations                   18653/v1/2020.emnlp-main.550.
+  with large language models, 2023.   URL https://                    Khandelwal,U.,Levy,O.,Jurafsky,D.,Zettlemoyer,L.,and
+  arxiv.org/abs/2310.14408.                                              Lewis,M. Generalizationthroughmemorization: Nearest
+
+Grattafiori, A., Dubey, A., Jauhri, A., et al.  The llama 3              neighborlanguagemodels. InInternationalConference
+  herd of models, 2024. URLhttps://arxiv.org/                            onLearningRepresentations(ICLR), 2020.
+  abs/2407.21783.                                                     Kwiatkowski, T., Palomaki, J., Redfield, O., Collins, M.,
+
+Guu, K.,Lee,K., Tung,Z., Pasupat,P.,andChang, M.-W.                      Parikh, A., Alberti, C., Epstein, D., Polosukhin, I., De-
+  Realm: retrieval-augmented language model pre-training.                vlin, J., Lee, K., Toutanova, K., Jones, L., Kelcey, M.,
+  InInternationalConferenceonMachineLearning,2020.                       Chang, M.-W., Dai, A. M., Uszkoreit, J., Le, Q., and
+
+                                                                   9
+
+========== PDF PAGE 10 / 19 ==========
+          Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+  Petrov,S. Natural questions: A benchmark forquestion                  FINDINGS-EMNLP.378. URLhttps://doi.org/
+  answeringresearch.TransactionsoftheAssociationfor                     10.18653/v1/2023.findings-emnlp.378.
+  Computational Linguistics, 7:452–466, 2019.  doi: 10.               Qin, Z., Jagerman, R., Hui, K., Zhuang, H., Wu, J., Yan,
+  1162/tacl   a 00276. URLhttps://aclanthology.                         L., Shen, J., Liu, T., Liu, J., Metzler, D., Wang, X., and
+  org/Q19-1026/.                                                        Bendersky, M. Large language models are effective text
+
+Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V.,           rankers with pairwise ranking prompting.  In Duh, K.,
+  Goyal,N.,K¨uttler,H.,Lewis,M.,Yih,W.-t.,Rockt¨aschel,                 Gomez, H.,and Bethard, S.(eds.),FindingsoftheAsso-
+  T.,Riedel,S.,andKiela, D. Retrieval-augmented gener-                  ciationforComputationalLinguistics: NAACL2024, pp.
+  ationforknowledge-intensivenlptasks. InAdvancesin                     1504–1518,MexicoCity,Mexico,June2024.Association
+  NeuralInformationProcessingSystems, volume 33, pp.                    for Computational Linguistics. doi: 10.18653/v1/2024.
+  9459–9474, 2020.                                                      findings-naacl.97.  URLhttps://aclanthology.
+                                                                        org/2024.findings-naacl.97/.
+Li,X.,Dong,G.,Jin,J.,Zhang,Y.,Zhou,Y.,Zhu,Y.,Zhang,                   Qwen, :, Yang, A., Yang, B., Zhang, B., Hui, B., Zheng,
+  P.,andDou,Z. Search-o1: Agenticsearch-enhancedlarge                   B., Yu, B., Li, C., Liu, D., Huang, F., Wei, H., Lin, H.,
+  reasoning models.CoRR, abs/2501.05366, 2025a. doi:                    Yang, J., Tu, J., Zhang, J., Yang, J., Yang, J., Zhou, J.,
+  10.48550/ARXIV.2501.05366.   URL https://doi.                         Lin, J., Dang, K., Lu, K., Bao, K., Yang, K., Yu, L.,
+  org/10.48550/arXiv.2501.05366.                                        Li, M., Xue, M., Zhang, P., Zhu, Q., Men, R., Lin, R.,
+
+Li, Y., Zhang, W., Yang, Y., Huang, W., Wu, Y., Luo, J.,                Li, T., Tang, T., Xia, T., Ren, X., Ren, X., Fan, Y., Su,
+  Bei, Y., Zou, H. P., Luo, X., Zhao, Y., Chan, C., Chen, Y.,           Y., Zhang, Y., Wan, Y., Liu, Y., Cui, Z., Zhang, Z., and
+  Deng,Z., Li,Y., Zheng,H., Li,D., Jiang, R.,Zhang, M.,                 Qiu, Z. Qwen2.5 technical report, 2025. URLhttps:
+  Song,Y.,and Yu,P.S. Towards agenticRAGwithdeep                        //arxiv.org/abs/2412.15115.
+  reasoning: A survey of rag-reasoning systems in llms.               Ram,O.,Levine,Y.,Dalmedigos,I.,Muhlgay,D.,Shashua,
+  CoRR, abs/2507.09477, 2025b. doi: 10.48550/ARXIV.                     A.,  Leyton-Brown,  K.,  and Shoham,  Y.    In-context
+  2507.09477. URLhttps://doi.org/10.48550/                              retrieval-augmented language models.Transactions of
+  arXiv.2507.09477.                                                     theAssociationforComputationalLinguistics,pp.1316–
+Ma,  X.,  Zhang,  X.,  Pradeep,  R.,  and  Lin,  J.    Zero-            1331, 2023.
+  shot listwise document reranking with a large language              Robertson,  S. E. and Zaragoza,  H.    The probabilistic
+  model,  2023.    URL https://arxiv.org/abs/                           relevance  framework:   BM25  and  beyond.Found.
+  2305.02156.                                                           Trends Inf. Retr., 3(4):333–389, 2009.   doi:  10.1561/
+Mallen, A., Asai, A., Zhong, V., Das, R., Khashabi, D.,                 1500000019.  URL https://doi.org/10.1561/
+  and Hajishirzi, H.   When not to trust language mod-                  1500000019.
+  els: Investigating effectiveness of parametric and non-             Sachan,  D. S.,  Lewis,  M.,  Joshi,  M.,  Aghajanyan,  A.,
+  parametric memories. In Rogers, A., Boyd-Graber, J. L.,               Yih,  W.,  Pineau,  J.,  and  Zettlemoyer,  L.     Improv-
+  and Okazaki,  N. (eds.),Proceedings of the 61st An-                   ing passage retrieval with zero-shot question genera-
+  nualMeetingoftheAssociationforComputationalLin-                       tion.   In Goldberg, Y., Kozareva, Z., and Zhang, Y.
+  guistics (Volume 1: Long Papers), ACL 2023, Toronto,                  (eds.),Proceedings of the 2022 Conference on Empir-
+  Canada, July 9-14, 2023, pp. 9802–9822. Association                   icalMethodsinNaturalLanguageProcessing,EMNLP
+  for Computational Linguistics, 2023.   doi:  10.18653/                2022, Abu Dhabi, United Arab Emirates, December
+  V1/2023.ACL-LONG.546.URLhttps://doi.org/                              7-11, 2022,  pp. 3781–3797. Association for Compu-
+  10.18653/v1/2023.acl-long.546.                                        tational Linguistics,  2022.    doi:   10.18653/V1/2022.
+Nogueira, R. and Cho, K. Passage re-ranking with BERT.                  EMNLP-MAIN.249.  URL https://doi.org/10.
+  CoRR, abs/1901.04085, 2019. URL         http://arxiv.                 18653/v1/2022.emnlp-main.249.
+  org/abs/1901.04085.                                                 Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Zhang, M.,
+Press, O., Zhang, M., Min, S., Schmidt, L., Smith, N. A.,               Li,Y.K.,Wu,Y.,andGuo,D. Deepseekmath: Pushing
+  andLewis,M. Measuringandnarrowingthecomposition-                      the limits of mathematical reasoning in open language
+  ality gap in language models. In Bouamor, H., Pino, J.,               models.CoRR, abs/2402.03300, 2024. doi: 10.48550/
+  and Bali, K. (eds.),FindingsoftheAssociationforCom-                   ARXIV.2402.03300.  URL https://doi.org/10.
+  putationalLinguistics: EMNLP2023,Singapore,Decem-                     48550/arXiv.2402.03300.
+
+  ber 6-10, 2023, pp. 5687–5711. Association for Com-                 Shi,W.,Min,S.,Yasunaga,M.,Seo,M.,James,R.,Lewis,
+  putational Linguistics, 2023.  doi:  10.18653/V1/2023.                M., Zettlemoyer, L., and Yih, W.-t. REPLUG: Retrieval-
+
+                                                                  10
+
+========== PDF PAGE 11 / 19 ==========
+         Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+  augmented black-box language models.   In Duh, K.,                Wei,J.,Wang,X.,Schuurmans,D.,Bosma,M.,Ichter,B.,
+  Gomez, H., and Bethard, S. (eds.),Proceedings of the                 Xia, F., Chi, E. H., Le, Q. V., and Zhou, D.  Chain-of-
+  2024ConferenceoftheNorthAmericanChapterofthe                         thought prompting elicits reasoning in large language
+  AssociationforComputationalLinguistics: HumanLan-                    models.   In Koyejo, S., Mohamed, S., Agarwal, A.,
+  guageTechnologies(Volume1: LongPapers), pp. 8371–                    Belgrave, D., Cho, K., and Oh, A. (eds.),Advances in
+  8384, Mexico City, Mexico, June 2024. Association                    Neural Information Processing Systems 35:   Annual
+  for Computational Linguistics. doi: 10.18653/v1/2024.                Conference on Neural Information Processing Systems
+  naacl-long.463.     URL https://aclanthology.                        2022,NeurIPS2022,NewOrleans,LA,USA,November
+  org/2024.naacl-long.463/.                                            28-December9,2022, 2022. URL       http://papers.
+Sun, J., Zhong, X., Zhou, S., and Han, J.  Dynamicrag:                 nips.cc/paper_files/paper/2022/hash/
+  Leveraging outputs oflarge language model as feedback                9d5609613524ecf4f15af0f7b31abca4-Abstract-Conference.
+  for dynamicreranking inretrieval-augmentedgeneration.                html.
+  CoRR, abs/2505.07233, 2025.  doi:  10.48550/ARXIV.                Yang, Z., Qi, P., Zhang, S., Bengio, Y., Cohen, W. W.,
+  2505.07233. URLhttps://doi.org/10.48550/                             Salakhutdinov, R., and Manning, C. D.  Hotpotqa:  A
+  arXiv.2505.07233.                                                    dataset for diverse, explainable multi-hop question an-
+Sun, W., Yan, L., Ma, X., et al.   Is ChatGPT good at                  swering.   In Riloff, E., Chiang, D., Hockenmaier, J.,
+  search? investigatinglargelanguagemodelsasre-ranking                 and Tsujii, J. (eds.),Proceedings of the 2018 Confer-
+  agents.  In Bouamor, H., Pino, J., and Bali, K. (eds.),              ence on Empirical Methods in Natural Language Pro-
+  Proceedingsofthe2023ConferenceonEmpiricalMeth-                       cessing, Brussels, Belgium, October 31 - November 4,
+  odsinNaturalLanguageProcessing,pp.14918–14937,                       2018, pp. 2369–2380. Association for Computational
+  Singapore, December 2023. Association for Computa-                   Linguistics, 2018.  doi: 10.18653/V1/D18-1259.  URL
+  tional Linguistics. doi: 10.18653/v1/2023.emnlp-main.                https://doi.org/10.18653/v1/d18-1259.
+  923.  URL https://aclanthology.org/2023.                          Yu, Y., Ping, W., Liu, Z., Wang, B., You, J., Zhang, C.,
+  emnlp-main.923/.                                                     Shoeybi, M., and Catanzaro, B.   Rankrag:  Unifying
+Trivedi, H., Balasubramanian, N., Khot, T., and Sabhar-                context ranking with retrieval-augmented generation in
+  wal, A.  ♪  MuSiQue:  Multihop questions via single-                 llms. InGlobersons,A.,Mackey,L.,Belgrave,D.,Fan,
+  hop  question  composition.Transactions of the As-                   A., Paquet, U., Tomczak, J. M., and Zhang, C. (eds.),
+  sociation for Computational Linguistics, 10:539–554,                 AdvancesinNeuralInformationProcessingSystems38:
+  2022.   doi:  10.1162/tacl    a 00475.   URL https://                Annual Conference on Neural Information Processing
+  aclanthology.org/2022.tacl-1.31/.                                    Systems 2024, NeurIPS 2024, Vancouver, BC, Canada,
+                                                                       December10-15,2024,2024. URL       http://papers.
+Trivedi, H., Balasubramanian, N., Khot, T., and Sabhar-                nips.cc/paper_files/paper/2024/hash/
+  wal, A. Interleaving retrieval with chain-of-thought rea-            db93ccb6cf392f352570dd5af0a223d3-Abstract-Conference.
+  soning for knowledge-intensive multi-step questions. In              html.
+  Rogers, A., Boyd-Graber, J. L., and Okazaki, N. (eds.),           Zhang, Y., Li, M., Long, D., Zhang, X., Lin, H., Yang,
+  Proceedings of the 61st Annual Meeting of the Associ-                B.,  Xie,  P.,  Yang,  A.,  Liu,  D.,  Lin,  J.,  Huang,  F.,
+  ation for Computational Linguistics (Volume 1:  Long                 and  Zhou,  J.    Qwen3  embedding:   Advancing  text
+  Papers), ACL 2023, Toronto, Canada, July 9-14, 2023,                 embedding and reranking through foundation models.
+  pp. 10014–10037. Association for Computational Lin-                  CoRR, abs/2506.05176, 2025.  doi:  10.48550/ARXIV.
+  guistics, 2023.   doi:  10.18653/V1/2023.ACL-LONG.                   2506.05176. URLhttps://doi.org/10.48550/
+  557.     URL https://doi.org/10.18653/v1/                            arXiv.2506.05176.
+  2023.acl-long.557.
+Wang,  L.,  Yang,  N.,  Huang,  X.,  Jiao,  B.,  Yang,  L.,
+  Jiang,  D.,  Majumder,  R.,  and Wei,  F.    Text embed-
+  dings  by  weakly-supervised  contrastive  pre-training.
+  CoRR, abs/2212.03533, 2022.  doi:  10.48550/ARXIV.
+  2212.03533. URLhttps://doi.org/10.48550/
+  arXiv.2212.03533.
+Wang,S.,Zhang,L.,Fu,Z.,Mao,Z.,andZhang,Y. Dacl-
+  rag: Dataaugmentationstrategywithcurriculumlearning
+  forretrieval-augmentedgeneration,2025. URLhttps:
+  //arxiv.org/abs/2505.10493.
+
+                                                                11
+
+========== PDF PAGE 12 / 19 ==========
+           Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+A. Appendix
+A.1. Algorithm
+We present our algorithm ofBAR-RAGin Algorithm1.
+
+Algorithm 1Boundary-aware Evidence Selection Training (BAR-RAG)
+Require:Training datasetD, retrieverR, selectorπ                                      r, generatorπ                g
+Require:Target correctnessc, reward thresholdδ, rolloutsK, evidence samplesM
+Require:Training iterationsT
+ 1:// Training-time filtering
+ 2:D      filt←FILTER(D)
+ 3:fort=1toTdo
+ 4:   // Stage 1: Selector Training (generator frozen)
+ 5:   foreach queryqin batch fromD                                      filt do
+ 6:      C←R(q)
+ 7:       SampleMevidence sets{S                                (m)   }Mm=1      fromπ         r
+ 8:       foreachS                 (m)     do
+ 9:           SampleKanswers fromπ                            g(·|q,S     (m)    )
+10:         Estimateˆp(S                             (m)    )and compute selector rewardR        r(S   (m)    )
+11:     end for
+12:     Update selectorπ                  r via GRPO
+13: end for
+14: // Stage 2: Generator Training (selector frozen)
+15: foreach queryqin batch fromDdo
+16:    C←R(q)
+17:    S←π            r(q,C)
+18:     SampleKanswers fromπ                              g(·|q,S)
+19:     Update generatorπ                     g via GRPO
+20: end for
+21:end for
+
+
+A.2. Comparison with Recent Reasoning and Agentic RAG Methods
+TofurthercontextualizeBAR-RAGwithintherapidlyevolvinglandscapeofreasoning-centricandagenticRAGsystems,
+we compare against several recent representative methods, including Search-o1 (Li et al.,2025a), Search-R1 (Jin et al.,
+2025),andDynamicRAG(Sunetal.,2025).                                 1 Theseapproachesemphasizeexplicitmulti-stepsearch,iterativeretrieval,or
+reinforcement-learning-based reranking at inference time, and are often evaluated under substantially different retrieval and
+search budgets.
+Inparticular,wegroupresultsbybackbonescalefollowingthestructureofTable3,andreportthebest-performingiteration
+ofBAR-RAG for each backbone. Importantly,BAR-RAG incurs no additional inference-time overhead beyond standard
+RAG, whereasthe comparedreasoning and agentic methods typicallyrely onmulti-round search ortool invocationduring
+inference.
+
+A.3. Counterfactual Evidence Dependence Analysis
+A potentialconcern with generator-aware evidenceselection is whetherperformance gains arisefrom genuine evidenceuse
+or from self-confirmationeffects induced by generator feedback. To directly test whether the model’s predictions causally
+depend on the evidence it cites, we perform a counterfactual evidence-dependence analysis.
+Foreachtestexample,wefirstrunthemodelunderthestandardsetting(FULL)usingthetop-    k  retrieveddocuments,and
+
+    1As these methods vary widely in backbone models, inference-time computation, and retrieval interfaces, a strictly controlled apples-
+to-apples comparison is not always possible. Therefore, this table is intended to provide a qualitative and contextual comparison rather
+than a claim of direct superiority.
+
+                                                                              12
+
+========== PDF PAGE 13 / 19 ==========
+                          Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+              Table3.ComparisonwithrecentreasoningandagenticRAGmethods(EM,%). ResultsaregroupedbybackbonefollowingTable1,and
+               BAR-RAG reports the best iteration for each backbone. Search-o1 and Search-R1 results are taken directly from the original papers.
+               DynamicRAGresultsareobtainedbyre-runningtheauthors’releasedcheckpointunderourevaluationpipeline,asitsoriginalsettingis
+               notfullyalignedwithours. Notably,Search-R1employssubstantiallydifferentretrievalconfigurationsonmulti-hopQA(HotpotQA,
+               2WikiMultiHopQA, MuSiQue and Bamboogle), involving multiple rounds of search with multiple documents per round, whereas our
+               settinguses asingle-shottop-k retrieval(top-5)without iterative search. As aresult,Search-R1 resultsonthese datasets(markedwith †)
+               are not directly comparable toBAR-RAGand should be interpreted with caution.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+               recordthesetofdocumentscitedinthemodel’sgeneration. Wethenconstructtwocounterfactualvariantswhilekeeping
+               the question and decoding settings fixed: (i)REMOVE-CITED, where all documents cited by the model in the original
+               generation are removed fromthe input, and (ii)KEEP-ONLY-CITED, where onlythe cited documents areretained and all
+               other retrieved documents are discarded. The cited document set is always determined from the originalFULLgeneration
+               and kept fixed across counterfactual runs.
+              Table4reports Exact Match (EM) results on NQ, HotpotQA, and Bamboogle using Qwen2.5-7B-Instruct.  Across all
+               datasets,removingthecitedevidencecausesalargeperformancedrop,with∆  rm   exceeding24EMonallthreebenchmarks.
+              Thissharpdegradationindicatesthatcorrectpredictionscriticallyrelyonthedocumentsexplicitlyreferencedbythemodel.
+               In contrast, retaining only the cited documents largely preserves performance and in some cases slightly improves it (e.g.,
+               NQ and Bamboogle), suggesting that the cited documents form a compact and sufficient support set, while additional
+               retrieved documents often act as noise.
+
+               A.4. Extended Related Work
+               A.4.1. RETRIEVAL-AUGMENTEDGENERATION
+               Retrieval-Augmented Generation (RAG) has emerged as a general framework for grounding language model outputs in
+               external knowledge sourceAR s, mitigating hallucinationand enabling dynamic knowledge updates. Early formulations
+               combine neural retrieval with sequence-to-sequence generation for knowledge-intensive tasks (Lewis et al.,2020;Guu
+               etal.,2020;Wangetal.,2025;Caoetal.,2025). Beyonddocument-levelretrieval,severalworksexploredatastore-based
+
+
+              Table4.Counterfactualevidence-dependenceanalysisonQwen2.5-7B-Instruct.REMOVE-CITEDremovesalldocumentscitedbythe
+               modelintheoriginalgeneration,whileKEEP-ONLY-CITEDretainsonlytheciteddocuments.                    ∆  rm   denotestheEMdropfromFULLto
+               REMOVE-CITED.
+
+                                                  Dataset          Full    Remove-Cited    Keep-Only-Cited∆                           rm
+                                                  NQ                 46.9             20.4                        47.3                26.5
+                                                  HotpotQA      38.8             12.2                        38.5                26.6
+Method               NQ     TriviaQA     PopQA     HotpotQA     2Wiki     MuSiQue     Bamboogle     Avg.Bamboogle    39.6             15.3                        40.1                24.3
+                                                        Qwen2.5-3B-Instruct
+Search-o1            23.8          47.2            26.2             22.1            21.8            5.4                 32.0           25.513
+Search-R1           34.1          54.5            37.8            32.4†         31.9†        10.3†             26.4†         32.5
+BAR-RAG41.5          61.3            43.4             33.2     26.4            7.4                 26.3    34.3
+                                                        Qwen2.5-7B-Instruct
+Search-o1            15.1          44.3            13.1             18.7            17.6            5.8                 29.6           20.6
+Search-R1           39.3          61.0            39.7            37.0†         41.4†        14.6†             36.8†         38.5
+BAR-RAG46.9          64.5            46.9             38.8     29.8            9.1            39.6           39.1
+                                                      LLaMA-3.1-8B-Instruct
+DynamicRAG     46.4          57.5            36.7             34.2               –                 –                     –
+BAR-RAG49.5          67.3            48.6             41.2     33.0           12.0                33.3           40.7
+
+========== PDF PAGE 14 / 19 ==========
+           Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+or token-level augmentation.  For example, kNN-LM (Khandelwal et al.,2020) augments next-token prediction with
+nearest-neighborretrievaloveralargedatastore,whilesubsequentextensionsimproveefficiencyandcontextualization(Ram
+et al.,2023).
+Recent research has focused on tighter integrationbetween retrieval and generation. Some approachestrain retrieval and
+generation components end-to-end, while others introduce explicit control mechanisms to decide when retrieval should
+occur. Self-RAG(Asaietal.,2024)equipsthegeneratorwithalearnedcriticthatreflectsonintermediategenerationsand
+dynamicallytriggersretrieval. Thesemethodsprimarilyfocusonretrievaltimingorintegrationstrategy,whereasourwork
+complements them by addressing the orthogonal problem of evidence selection quality under fixed retrieval budgets.
+
+A.4.2. DOCUMENTRERANKING
+Reranking is a long-standing component in information retrieval pipelines, aiming to refine initial retrieval results before
+downstream consumption. Traditional learning-to-rank approaches optimize pairwise or listwise objectives over hand-
+crafted features (Cao et al.,2007). With the advent of pretrained language models, neural rerankers based on cross-encoder
+architectureshavebecomethedominantparadigm,jointlyencodingquery–documentpairstocomputerelevancescoreswith
+fine-grained token interactions (Nogueira & Cho,2019).
+Largelanguage modelshaverecently beenexploredas rerankers,leveraging theirreasoning capabilitiesto assessdocument
+usefulness.  Prior work spans multiple granularities, including pointwise relevance prediction or likelihood estimation
+(Drozdov et al.,2023;Sachan et al.,2022), pairwise comparison of candidate documents (Qin et al.,2024), and listwise
+ranking that directly outputs document permutations (Sun et al.,2023;Ma et al.,2023). Many of these approaches operate
+in a zero-shot or weakly supervised setting and optimize relevance-based objectives.
+Several recent works incorporate reinforcement learning to optimize reranking policies. DynamicRAG (Sun et al.,2025)
+formulates reranking as a sequential decision process and uses generator feedback as a reward signal to dynamically
+determine both the ordering and the number of documents. While effective, such approaches typically rely on relevance
+oranswer-quality-basedrewards. Incontrast,ourmethodintroducesanexplicitcompetence-awareobjectivethatdirectly
+modelsevidencedifficulty,targetinghard-but-solvableevidencesetsthatmaximizelearningsignalfordownstreamgenerator
+training.
+
+A.5. Training Implementation Details
+WeuseQwen2.5-3B-Instruct,Qwen2.5-7B-Instruct,andLLaMA-3.1-8B-Instructasbackbonemodelsforboththeselector
+andthegenerator. In both trainingstages,weadoptparameter-efficientfine-tuningusingLoRAadapterswithrank32and
+scaling factorα=16, while keeping all backbone parameters frozen.
+For retrieval, we useE5as the dense retriever to obtain a fixed pool of top-        n= 25       candidate documents for each query.
+During selector training, we sampleM=8candidate evidence sets per query, each consisting ofk=5documents.
+Each sampled evidence set is evaluated usingK= 10        generator rollouts to estimate the correctness probability ˆp(S)        . A
+rolloutisdeemedcorrectifitsfinalgeneratorrewardexceedsathresholdδ=0.8       . Theselectorrewardtargetsacorrectness
+level of c= 0.5       , with boundary and relevance weights λ bdy   = 1.0       and λ rel  = 0.2     , respectively.  We use a relevance
+temperatureτ=10.0          and applya count penaltyofα=0.5         per documentdeviation fromthe target sizek∗ =5  , cappedat
+P max    =1.0.
+Thegeneratorrewardcombinesansweraccuracyandcitationqualitywithweightsλ acc  =0.8      andλ cite  =0.2     . Theaccuracy
+rewardweightstoken-levelF1andexactmatchasβ 1 =0.7      andβ 2 =0.3     ,respectively. Thecitationrewardtargetsn ∗ =2
+cited documents.
+Both stages are optimized using GRPO with a learning rate of 4×10     −6   , cosine learning rate decay with 2% warmup,
+clippingparameterϵ=0.2       ,batchsize 8,andKLregularizationcoefficient0.001     . Trainingisconductedforthreeiterations
+on8×A100 (40GB) GPUs using bfloat16 mixed-precision training with gradient checkpointing.
+
+A.6. Training-time Filtering Details
+We now provide implementation details for the filtering procedure described in Section??. For each training query, we
+sampleN   reranker rollouts andK   generator rollouts per evidence set. Generator outputs are judged correct if their total
+reward exceeds a fixed thresholdδ, consistent with the correctness definition used during selector training.
+
+                                                                        14
+
+========== PDF PAGE 15 / 19 ==========
+                          Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+                                                            Table5.Dataset statistics for training and evaluation.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+              In practice,we compute themean and variance of empiricalcorrectness across rerankerrollouts. Queries with near-zero
+              variance or near-deterministic outcomes are removed, as they correspond to trivially easy or unanswerable cases. Unless
+              otherwisestated,weretainquerieswhosemeancorrectnesssatisfiesµ q ∈[m       min  ,m  max   ]andwhosevarianceexceedsvmin  .
+              In all experiments, we use N= 8       reranker rollouts and K= 10        generator rollouts.  We set the correctness threshold
+              toδ= 0.5       . The mean correctness bounds arem  min   = 0.25       andm  max    = 0.85      , and the minimum variance threshold is
+              vmin   =0.02. This filtering step is applied only to selector training and does not affect generator training.
+
+              A.7. Training Data
+              FollowingJin  et  al.(2025),  we  construct  the  training  set  by  merging  the  training  splits  of  Natural  Questions
+              (NQ)(Kwiatkowskietal.,2019)andHotpotQA(Yangetal.,2018). NQprovidessingle-hopfactoidquestionsderivedfrom
+              real Google search queries, while HotpotQA contributes multi-hop questions that require reasoning over multiple Wikipedia
+              passages. This combination ensures coverage of both simple retrieval scenarios and complex multi-step reasoning tasks.
+              Fortheretrievalcorpus,weusethe2018Wikipediadump(Karpukhinetal.,2020),whichcontainsapproximately21million
+              passages. Weemploy E5(Wanget al.,2022)as the denseretriever. Foreach query, weretrieve thetop-25 passages toform
+              a fixed retrieval pool, from which the selector learns to compose evidence subsets during training.
+              Table5summarizesthedatasetstatistics. Thecombinedtrainingsetcontains87,925question-answerpairs. Eachtraining
+              instanceconsistsofaquestionq,theground-truthanswera,andaretrievalpoolD q containingthetop-25passagesretrieved
+              forq. DuringBAR-RAGtraining, the selector operates over this fixed retrieval pool, learning to compose evidence subsets
+              that challenge the generator near its competence boundary.
+              Weevaluateon sevenbenchmark datasetstoassess bothin-domain andout-of-domaingeneralization: (1)In-domain: NQ
+              andHotpotQA;(2)Out-of-domain: TriviaQA(Joshietal.,2017),PopQA(Mallenetal.,2023),2WikiMultiHopQA(Ho
+              et al.,2020), Musique (Trivedi et al.,2022), and Bamboogle (Press et al.,2023). Following?, we use Exact Match (EM) as
+              the evaluation metric.
+
+              A.8. Case Study
+              Table6presentsarepresentativecasestudyillustratinghow        BAR-RAGprogressivelyhardensevidencecompositionacross
+              training iterations while operating over a fixed top-25 retrieval pool.
+              In Iteration1, the selector surfacesthe two[GOLDEN]documents at thetop of the evidencelist. One documentexplicitly
+              identifies Claudio L´opez as a retired Argentine forward who played as a main attacking player for Valencia CF, while the
+Split      Dataset                             #Examples      Task Type                   Domainotherconfirms hisroleasa regular starterinValencia’sattackinglineduring therelevant period. Theremainingdocuments
+              are largely[IRRELEVANT]and do not introduce strong competing signals. As a result, the generator can answer the
+            NQ                                               79,168     Single-hop               In-domain
+Train       HotpotQA                                    8,757       Multi-hop               In-domain15
+            Total                                           87,925           –                                 –
+            NQ                                                  3,610     Single-hop               In-domain
+            HotpotQA                                    7,405       Multi-hop               In-domain
+Eval        TriviaQA                                   11,313     Single-hop     Out-of-domain
+            PopQA                                       14,267     Single-hop     Out-of-domain
+            2WikiMultiHopQA               12,576       Multi-hop     Out-of-domain
+            Musique                                       2,417       Multi-hop     Out-of-domain
+            Bamboogle                                     125       Multi-hop     Out-of-domain
+
+========== PDF PAGE 16 / 19 ==========
+          Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+question correctly with minimal reasoning effort, relying primarily on direct evidence aggregation.
+In Iteration 2, the same two golden documents remain present but are no longer adjacent.  They are interleaved with
+[MISLEADING]documentsthatarehighlyrelevantatthesurfacelevel,suchasprofilesofMarioKempesorsummariesof
+Argentine forwards in La Liga. These distractors satisfy several query attributes (e.g., nationality, position, club association)
+butfailtojointlysatisfyallconstraints. Consequently,positionalheuristicsorshallowrelevancematchingbecomeunreliable,
+and correct prediction requires identifying and combining the truly decisive evidence.
+By Iteration 3, BAR-RAG further increases structural difficulty by pushing the two golden documents deeper into the
+evidence set and surrounding them with multiple misleading but plausible alternatives. The shortcut evidence remains
+visible butbecomes insufficient: although figures suchas Mario Kempes matchmany individual queryfacets, they do not
+simultaneouslysatisfytheconjunctionofbeingretired,Argentine,aforward,andamainplayerforValenciaCFduringthe
+specified era. Only by consistently trackingentity identity across thedispersed golden documents can the generator arrive at
+the correct answer.
+Across iterations, task solvability is preserved, as the same two golden documents are always present.  However, the
+evidencestructureisprogressivelyhardened: decisiveinformationisnolongertop-rankedorcontiguous,andmisleading
+cues increasingly dominate surface relevance. This case study demonstrates thatBAR-RAG improves robustness not by
+introducing new evidence, but by reshaping the composition and ordering of existing retrieval results to suppress shortcut
+reasoning and induce genuine multi-hop integration near the generator’s competence boundary.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                      16
+
+========== PDF PAGE 17 / 19 ==========
+                          Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+              Table 6.Case study illustrating boundary-aware evidence selection from a fixed top-25 retrieval pool. Document IDs correspond to
+               original retrieval ranks. Across iterations, the same two[GOLDEN]documents remain necessary to answer the question, while their
+               relative positions are progressively dispersed and surrounded by[MISLEADING]but topically relevant noise and[IRRELEVANT]
+               documents. Thisstructuredhardeningpreservessolvabilitywhileforcingmulti-hopreasoningnearthegenerator’scompetenceboundary.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+               A.9. Prompt
+               This section presents the prompt templates we used for the generator and selector, in Table7and Table8, respectively.
+
+
+
+
+Question:WhichretiredArgentinefootballerwhoplayedasaforwardwasamainplayerforValenciaCF?
+Iteration1                                               Iteration2                                               Iteration3
+(Doc1)[GOLDEN]                                  (Doc1)[GOLDEN]                                   (Doc5)[MISLEADING]
+Title:Claudio L      ´opez — Career Sum-        Title:Claudio L      ´opez — Career Sum-         Title:Mario   Kempes   —   Career
+mary                                            mary                                             Overview
+Content:ClaudioL              ´opezisaretiredAr-Content:Claudio L               ´opez played as aContent:Kempes is remembered as
+gentinefootballerwhoplayedasafor-               main forward for Valencia CF in the              one of the most influential Argentine
+ward and was a main attacking player            late1990s.                                       forwardsinSpanishfootball.
+forValenciaCF.                                  (Doc5)[MISLEADING]                               (Doc11)[MISLEADING]
+(Doc2)[GOLDEN]                                  Title:Mario   Kempes   —   Career                Title:ArgentineLegendsinLaLiga
+Title:ValenciaCFSquad(1998–2000)                Overview                               17        Content:Several Argentine forwards
+Content:Valencia relied on Claudio              Content:Mario Kempes is a retired                achieved legendary status at Spanish
+L´opezasaregularstarterintheirattack-           ArgentineforwardandoneofValencia                 clubs.
+inglineduringthisperiod.                        CF’smosticonichistoricalplayers.                 (Doc1)[GOLDEN]
+(Doc3)[IRRELEVANT]                              (Doc2)[GOLDEN]                                   Title:Claudio L      ´opez — Career Sum-
+Title:ValenciaCFHistory(1990s)                  Title:ValenciaCFSquad(1998–2000)                 mary
+(Doc4)[IRRELEVANT]                              Content:Valencia relied on a fast Ar-            Content:Claudio L               ´opez is a retired
+Title:NotableFootballersinLaLiga                gentine forward as a regular starter in          Argentine forward who played for Va-
+                                                theirattackingsystem.                            lenciaCF.
+(Doc5)[MISLEADING]                              (Doc7)[MISLEADING]                               (Doc14)[MISLEADING]
+Title:Overview of Spanish Football              Title:ArgentineForwardsinLaLiga                  Title:ValenciaCFLegends
+Clubs                                           Content:Several Argentine forwards,              Content:Valencia CF has featured
+                                                including Kempes and others, played              many historically significant attacking
+                                                importantrolesinLaLigaclubs.                     players.
+                                                (Doc8)[IRRELEVANT]                               (Doc2)[GOLDEN]
+                                                Title:HistoryofLaLigaStadiums                    Title:ValenciaCFSquad(1998–2000)
+                                                                                                 Content:Valencia’smainattackingop-
+                                                                                                 tionsduringthiseraincludedafastAr-
+                                                                                                 gentineforward.
+Answer:ClaudioJavierL              ´opez
+
+========== PDF PAGE 18 / 19 ==========
+                     Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                      Table7.Prompt template for reasoning generator.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Reasoning Generator Prompt
+
+You are given a question and a set of retrieved documents. Your task is to answer the questionusing
+only information from the retrieved documents. Even for yes/no questions, you must determine the
+answer by reasoning from factual evidence in the documents.
+Output format (STRICT):
+
+   •<think>  Aconcisereasoningchainexplaininghowtheanswerisderivedfromthedocuments.
+     Keep it brief (1–3 sentences).</think>
+   •<answer>The final answer.</answer>
+
+Evidence citation rule:
+
+   •  Whenever you use a piece of evidence from the documents in your reasoning, youmustcite it
+     inline asDoc  [i].
+
+   •You may cite one or multiple documents, but only cite documents that are actually relevant.
+
+Answer rules:
+
+   •The answer should be ashort phrasedirectly supported by the retrieved documents.
+
+   • Donotintroduce external knowledge or assumptions.
+
+   • Donotoutput anything outside<think>and<answer>.
+
+Example (follow the style only):
+<think>  Doc  [1]  states  that  Future  Ted  serves  as  the  show’s
+narrator,  and  Doc  [4]  confirms  that  the  narrator  is  voiced  by  Bob18
+Saget.   </think>
+<answer>  Ted  Mosby  </answer>
+<Question>
+<Retrieved  Documents>
+
+========== PDF PAGE 19 / 19 ==========
+                     Rethinking the Reranker: Boundary-Aware Evidence Selection for Robust Retrieval-Augmented Generation
+
+
+
+
+                                                        Table8.Prompt template for evidence selector.
+
+
+
+
+
+
+
+
+
+
+
+Evidence Selector Prompt
+
+Youareanexpertevidence-setselectorforRAG.Yourgoalistoselectexactlyfivedocumentsthatmake
+the questionanswerable, but not trivial. Prefer evidence sets that sit near the model’scompetence
+boundary: solvablewith careful multi-step reasoning, yet notso direct that the answer isobvious from
+a single passage. You must follow the principles and output format strictly.
+Principles:
+
+  1. Answerability (must-have):The selected set must contain enough information to deduce the
+     correct answer. Donotselect sets that make the question impossible.
+
+  2. Non-triviality (must-have):Avoid sets where one document directly states the answer with
+     no integration needed. If a direct-answer passage is unavoidable for solvability, include itonly
+     together withsupporting/context passages that require cross-document integration.
+  3. Multi-hop integration:Prefersets that require combining atleasttwocomplementary clues(e.g.,
+     entity linking, temporal alignment, resolving aliases, chaining relations).
+
+  4. Controllednoise:Mildlyconflictingordistractingdetailsareallowedifthesetremainsanswerable;
+     do not include documents that are irrelevant or make the set unsolvable.
+
+  5. Diversity:Prefercomplementarydocumentscoveringdifferentpartsofthereasoningchain,rather
+     than near-duplicates.
+
+Output format (STRICT):
+
+   •<think>  Briefly explain whichdocuments contain key clues, how they complementeach other,
+     andwhythesetisanswerablebutrequiresintegration. Keepitconcise(2–4sentences). </think>
+
+   •<answer>  [doc          id1],  [doc       id2],  [doc       id3],  [doc        id4],  [doc       id5]
+     </answer>
+
+Rules:
+
+   • Selectexactly 5documents.
+
+   • In<answer>, listonlythe document identifiers in brackets, separated by commas.
+   • Donotoutput anything outside<think>and<answer>.
+
+Example (follow the style only):
+<think>  Doc  [3]  provides  the  birthplace  clue,  Doc  [7]  gives  a
+timeline,  and  Doc  [12]  resolves  an  alias;  combining  them  is
+necessary.   Doc  [5]  and  Doc  [9]  add  supporting  context  while
+introducing  mild  distraction,  keeping  the  set  solvable  but
+non-trivial.   </think>                                                        19
+<answer>  [3],  [5],  [7],  [9],  [12]  </answer>
+<Question>
+<Candidate  Documents  (Top-K)>

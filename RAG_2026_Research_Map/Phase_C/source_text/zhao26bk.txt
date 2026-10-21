@@ -1,0 +1,2040 @@
+
+
+========== PDF PAGE 1 / 31 ==========
+        Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented
+                                                              Generation
+
+
+
+                                                     Ziwen Zhao1  Menglin Yang1
+
+                            Abstract
+      Retrieval-augmented generation (RAG) enhances
+      largelanguagemodelswithexternalknowledge,
+      andtree-based RAG organizesdocuments intohi-
+      erarchicalindexesto supportqueries atmultiple
+      granularities. However,existingTree-RAGmeth-
+      ods designed for single-document retrieval face
+      critical challenges in scaling to cross-document
+      multi-hopquestions:(1)poordistributionadapt-
+      ability,  where          k -means  clustering  introduces
+      noise due to rigid distribution assumptions;(2)
+      structural isolation, astree indexeslack explicit
+      cross-document connections; and(3) coarse ab-
+      straction,which obscuresfine-graineddetails. To
+      address these limitations, we propose Ψ -RAG,
+      a tree-RAG framework with two key compo-
+      nents.First, a hierarchical abstract tree index
+      builtthroughaniterative“mergingandcollapse”
+      process that adapts to data distributions without
+      aprioriassumption.Second,amulti-granularre-                          Figure 1.(a) Two RAG application scenarios: single-document
+      trieval agent that intelligently interacts with the                  and cross-document retrieval. (b) Multi-hop QA performancew.r.t.
+      knowledge base with reorganized queries and an                       the number of documents in the tree index. (c)Ψ  -RAG has both
+      agent-powered hybrid retriever. Ψ -RAG supports                      efficient indexing and accurate multi-hop retrieval compared to
+      diverse tasks from token-level question answer-                      structured RAG baselines, using 2Wiki as an example.
+      ingtodocument-levelsummarization. Oncross-
+      document multi-hop QA benchmarks, it outper-                         question answering (QA) to document-level summariza-
+      forms RAPTOR by 25.9% and HippoRAG 2 by                              tion,RAGframeworksmustleveragethesemantichierarchy
+      7.4% in average F1 score1.                                           withincorpora(Sarthietal.,2024;Chenetal.,2024). Tradi-
+                                                                           tional retrievalsystems (Robertson etal.,2009;Karpukhin
+1. Introduction                                                            etal.,2020)slicedocumentsintoshort,independentchunks;
+                                                                           this fixed retrieval granularity leads to incomplete and in-
+Retrieval-augmentedgeneration(RAG)(Lewisetal.,2020)                        accurate responses for higher-level questions (Nair et al.,
+enhances large language models (LLMs) with reliable ref-                   2023;Liuetal.,2021;Sarthietal.,2024;Wangetal.,2025).
+erencesfromexternalknowledgebases. Toeffectivelyad-                        Structured RAGachieves multi-granularity by organizing
+dress multi-granular user queries from token-level factual                 documentsrelationallywithknowledgegraphindexes(Edge
+
+    1The  Hong  Kong  University  of  Science  and  Technology             etal.,2024;Jim              ´enezGuti´errezet al.,2024;2025)or hierar-
+(Guangzhou), Guangzhou, China. Correspondence to: Menglin                  chicallywithtreeindexes(Liuetal.,2021;Jinetal.,2025b;
+Yang<menglinyang@hkust-gz.edu.cn>.                                         Sarthietal.,2024). Itsutilityisdemonstratedintwokeysce-
+Proceedings of the 43   rd   International Conference on Machine           narios, as in Figure1(a): (1)single-documentretrieval, to
+Learning,Seoul,SouthKorea. PMLR306,2026. Copyright2026                     processuserrequestsindiversegranularitywithinasingle
+by the author(s).                                                          user-uploadeddocument(Jin etal.,2025a;Li etal.,2025b;
+   1Code     is     available     at    https://github.com/                Zhang et al.,2025a); (2)cross-document retrieval, to pro-
+Newiz430/Psi-RAG.                                                          cess userrequests bybuildinga large indexfrom anentire
+
+                                                                        1
+
+========== PDF PAGE 2 / 31 ==========
+                                         Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+              Table1.ComparisonofRAGframeworks. “ ? ”indicateslimited                      document retrieval with a reorganized query whenneeded.
+              support by specific methods.                                                 This empowers the tree retriever with better causal under-
+                                                                                           standingofuserquery. (3)Toresolvetheconflictbetween
+                                                                                           coarse abstraction and detailed factual retrieval, a multi-
+                                                                                           granularhybridretrievalframeworkisemployed,wherean
+                                                                                           agent-poweredsparseretrieversupplementsthehierarchical
+                                                                                           treeretrievalwithfine-grainedinformation,yieldingsignifi-
+                                                                                           cantperformancegains. Ourproposedframeworkpossesses
+                                                                                           numerous advantages:
+              (domain-specific) corpusand retrieving across multipledoc-                   •Ψ   -RAGgeneralizesTree-RAGfrompassage-levelto
+              uments,challengingthemulti-hopretrievalandreasoning                             corpus-levelindexing.AsshowninFigure1(c),            Ψ -RAG
+              capabilitiesofRAGframeworks(Trivedietal.,2023;Tang                              buildsacorpus-leveltree10×  fasterthanOpenIE-based
+              & Yang,2024).                                                                   Graph-RAG.Underthissetting,Ψ -RAGachievesaverage
+              OurworkfocusesonTree-RAG(Liuetal.,2021;Jinetal.,                                gainsof 23.7%in retrievaland 25.9%in generationover
+              2025b;Sarthietal.,2024;Taoetal.,2025;Rezazadehetal.,                            RAPTOR on token-level QA.
+              2025), which organizes documents into a tree-structured                      •Ψ   -RAG extends Tree-RAG to complex multi-hop sce-
+              index. It explicitly defines different information granular-                    narios.To our knowledge,          Ψ -RAG is the first Tree-RAG
+              ities, enabling superior retrieval performance, especially                      for cross-document multi-hop scenarios comparable to
+              for summativetasks (Sarthiet al.,2024;Xiaoet al.,2025).                         Graph-RAG, exhibiting great application potential. As
+              See AppendixFfor morerelated works. However, existing                           in Figure1(c),            Ψ -RAG is both efficient and powerful,
+              Tree-RAG methods mainly target single-hop retrieval on                          outperformingcutting-edgeGraph-RAGframeworkslike
+              a single long document, while cross-document and multi-                         HippoRAG 2 (Jim ´enez Guti´errez et al.,2025).
+              hop retrieval remain underexplored.  For example, repre-
+              sentativek -means-type cluster trees like RAPTOR (Sarthi                     •  AsinTable1,        Ψ -RAGisanall-in-oneTree-RAGframe-
+              et al.,2024) achieve high retrieval performance only with                       work supporting tasks across various granularities:
+              small-scale,passage-levelindexes. AsshowninFigure1(b),                          token-level factual QA, passage-level causal reasoning,
+              RAPTOR’s retrievalaccuracy drops significantlywhen                              and document-level summarization.
+              the search space expands to corpus-level with millions                       •Ψ   -RAG is built entirely with open-source LLMs. Its
+              of tokens. We identify three key limitations: (1)Poor dis-                      components are flexibly replaceable.  Ψ -RAG can be
+              tribution adaptability:                  k -means-type clustering implicitly    applied to custom corpora without any training or fine-
+              relies on spherical data distributions (Sarthi et al.,2024),                    tuning, demonstrating strong generalizability.
+              which introduces noisy documents to the retriever for cor-
+              pora with a skewed distribution.  (2)Structural isolation:
+              unlike Graph-RAG which dynamically hops between docu-                        2. Preliminary
+              ments based on pairwise relationships,leaf nodesin atree
+              index lack explicit connections. This prevents the retriever                 Retrieval-Augmented Generation.Given a user query
+              from capturing implicit causal dependencies in multi-hop                     q, an LLM f(q;I)         generates a corresponding response a,
+              questions. (3)Coarse abstraction: the coarse-grained ab-                     where I  is the system instruction for a specific task.  For
+              stracts act like a mosaic, obscuring token-level details at                  a reasoning model, a=R∪y           , where R   is the Chain-of-
+              the very beginning of retrieval, as dense vector matching                    Thought(Weietal.,2022)reasoningtextand             y isthefinal
+              strugglestopreciselyassociateaspecificentityintheuser                        answer.  An LLM equipped with RAG can be defined as
+              query with abstract concepts on top of the tree.                             f·r   , where the retrieverr(q;I)         mapsq to top-k  relevant
+              This work aims to address the limitations of Tree-RAG                        document chunks D ∗  ={u      i}ki=1    ⊂ D     using a scoring
+              on cross-document and multi-hop retrieval.  We present                       functions(q,u)      . The external corpusD  containsn=|D|
+              Ψ -RAG, a versatile and effective Tree-RAG framework,                        chunks in total. The indexI:D→Tmaps each chunk in
+              comprising ahierarchical abstract tree indexand amulti-                      Dto a discrete index spaceTfor better retrieval.
+              granular agentic retriever.  (1) To address poor distribu-                   Tree Index.We overload the symbol        T  to denote a tree.
+              tion adaptability, we build an abstract tree index via a hi-                 Formally, a treeT= (V,E)            is a connected acyclic graph
+              erarchicalclustering-inspired “merging andcollapse”pro-                      with a finite node setV={v        i}|V|i=1    and an edge setE ⊂
+              cess, which iteratively links similar chunks to existing or                  V×V    . The root node for a nodeu  is denoted asroot(u)          .
+              newlygeneratedupper-levelnodesinthetree. (2)Totackle                         Thesetofchildrenofu  isc(u)={v|u→v∈E}                        . Letℓ(u)
+              structuralisolation,aretrievalandansweringagentreasons                       be the set ofall leaf nodes reachable fromu . Thedepth of
+              throughtheuserquery,duringwhichitcallsforadditional                          a nodeδ(·)     is defined as the length of the path to the root,
+
+                                                                                        2
+
+
+
+Tasktype              Single-Cross-    Token-  Passage-  Document-
+                document   document    level     level      level
+TraditionalRAG   ✓     /times✓    ?      /times
+Graph-RAG      ✓     ✓    ✓    ✓     ?
+Tree-RAG       ✓     /times?    ✓     ✓
+Ψ-RAG(Ours)         ✓          ✓        ✓         ✓          ✓
+
+========== PDF PAGE 3 / 31 ==========
+                             Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure2.Overview of   Ψ  -RAG.InAbstractTreeIndexing,ahierarchicalabstracttreeisbuiltbyrankingpairwisechunksimilaritiesand
+applying an iterative “merging and collapse” process. Then, an abstraction agent generates a summative or keyword abstract for each
+abstractnode. InMulti-granularAgentic Retrieval,aretrievalandanswering (R&A)agentdynamicallyinteractswitha multi-granular
+knowledge base organized by both the tree index and a sparse keyword index. By adjusting the retrieval iterations and the utilization of
+the sparse index,Ψ-RAG adapts to diverse user requests from token-level question answering to document-level summarization.
+
+withδ(root)=0            . Thetreedepthisδ(T)=max            u∈T    δ(u)      .
+We denote the parent (ancestor) of leaf u  at a distance k
+aspk(u)    , wherep0(u) =u         androot(u) =p               δ(u)    (u)    . The
+least common ancestor (LCA) of two nodes is defined as
+the deepest node that is an ancestor to both:
+       LCA(u,v)=arg              max                            δ(a)   (1)
+                                a∈{p       k (u)}     δ(u)k=1   ∩{p     k (v)}     δ(v)k=1
+Atreeisbinary(orbifurcating)ifallitsnon-leafnodeshave
+exactlytwochildren. Atreeismultifurcatingifallnon-leaf
+nodes have at least two children and at least one node has
+morethantwochildren. Atreeisequi-depthifeveryleafis                                 Figure 3.Illustration of abstract tree building steps: merging, leaf
+equidistant from the root.                                                          node collapse, and abstract node collapse. Yellow arrows indicate
+                                                                                    the current chunk pair to be processed.
+3.Ψ-RAG
+
+As illustrated in Figure2,            Ψ -RAG follows the two-phase                  similar pair of document chunks (u,v)    , the tree is built
+paradigmofexistingstructuredRAG:indexingandretrieval.                               iteratively: if neitheru  norv has a parent, they are linked
+Thissectionformallypresentsitstwocorecomponents: Ab-                                underanewlycreatedabstractnodea: c(a)={u,v}              . This
+stract Tree Indexing and Multi-granular Agentic Retrieval.                          is called amerging. If one node        u  is already linked to an
+                                                                                    abstract nodep(u), the isolated nodevis also linked under
+3.1. Abstract Tree Indexing                                                         p(u)      : c(p(u))←c(p(u))∪{v}                                  . This is called aleaf node
+Ψ -RAG constructs atreeindexfromalongdocumentora                                    collapse. Ifboth           u andv arealreadylinkedtoabstractnodes
+documentcollection,which wetermanabstracttree. The                                  and their roots differ, then:
+leavesconsist oftheoriginal document chunksDandtheir                                 •  If δ(u)  = δ(v)              , their roots are merged under a new
+encoded dense vectors.  Upper-level nodes are calledab-                                abstract node a:  c(a) ={root(u),root(v)}                                 , making
+stract nodes, each containing an abstract of its children                              root(u)=root(v)=a.
+generatedbyanabstractionagent. Theabstracttreeiscon-                                 • Ifδ(u)>δ(v),root(v)is linked onto the path ofu:
+structedvia a“similarity ranking →   iterativemerging and
+collapse→abstraction” pipeline.                                                                c(p    δ(v)+1      (u))←c(p                δ(v)+1      (u))∪{root(v)}   (2)
+Similarityranking.First,alldocumentchunksareencoded                                    This resultsinδ(u)=δ(v)              . Thecase forδ(u)<δ(v)               is
+intofixed-lengthdensevectorse(D)∈R          |D|×d      e usingapre-                    analogous. This is called anabstract node collapse.
+trained language encoder. A symmetric similarity matrix
+S∈R     |D|×|D|    =e(D)e(D)               ⊤  is then constructed.  These           Figure3illustratesthesetree-buildingsteps. Theiteration
+chunk pairs are finally sorted in descending order based on                         runsforexactlyn−1       steps,whichistheminimumnumber
+their similarity scores.                                                            ofconnectionsrequiredtolinkalln  nodesintoasingletree.
+Iterativemergingandcollapse.Beginningfromthemost                                    Subsequently, the abstract tree isrebalancedby splitting
+
+                                                                                3
+
+========== PDF PAGE 4 / 31 ==========
+                          Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+nodeswithanexcessivenumberofchildrenanddistributing                          until theaction tag becomes<answer>or thenumber of
+the children evenly between two new nodes. This avoids                       retrieval steps reaches a thresholdimax   . The user instruc-
+overly long contexts for the abstraction agent. A detailed                   tion I  continuously reminds the agent of the remaining
+algorithm is provided in AppendixA.                                          retrieval attempts. If the information remains insufficient
+Abstraction.This step employs an abstraction agent to                        afterexhaustingallattempts,the R&Aagentreturns“Not
+generate and encode anabstract for each abstract node. We                    mentioned”.
+consider two abstraction types.  (1)Summative abstract:                      Agent-poweredHybridRetrieval.Inacorpus-levelsearch
+paragraphsofsummarytext(Sarthietal.,2024;Edgeetal.,                          space,the coarse-grainedupper-levelabstracts makeeven
+2024) that capture coherent logic and key entity relation-                   simplefactualsearcheschallengingforTree-RAG.Tobetter
+ships. (2)Keyword abstract: keywords of different types                      capturefine-grainedinformation,asparsekeywordindexis
+distilled fromthe documentchunks, withhigh information                       constructed during tree indexing using BM25 (Robertson
+density but weak logical correlations. Phrases are encour-                   et al.,2009).  During retrieval, the R&A agent combines
+agedoversinglewordstopreservetheentityco-occurrence.                         resultsfromboththetreeandsparseindexesviatwooptional
+                                                                             strategies:  (1) parametrically, using a reranker model to
+3.2. Multi-granular Agentic Retrieval                                        integrateboth top-k  chunks;or (2)non-parametrically,via
+Existing Tree-RAG frameworks struggle with multi-hop                         reciprocal rank fusion (RRF) (Cormack et al.,2009).
+questions due to the structural isolation of tree indexes. For               Furthermore, the R&A agent broadens the scope of sparse
+a multi-hop query like “Who is the wife of the man(David                     retrieval. It is encouraged to reorganize its query with en-
+Gest)who produced the documentary of the pop star who                        riched context, such as inserting descriptive appositions:
+influenced Beyonc´e?”, a retriever relying solely on dense                   q:  “WhoisthewifeofDavidGest?”      reorganization−−−−−−−→q              ′:“Who
+vector similarity would prioritize content related to “Bey-                  is the wife ofthe American film producerDavid Gest?”
+onc´e” and “documentary”, while missing the true subject
+“David Gest”. As suchimplicit associations oftenfollow a                     This adds thematic keywords for the sparse retriever and,
+causalorder,existingtreeretrievalmethodslikebeamsearch                       moreimportantly,aidsthetreeretrieverinlocatingrelevant
+(Sarthi et al.,2024;Gupta et al.,2025) are insufficient for                  upper-level abstract nodes withthe high-levelcontext. An
+ordered causality reasoning.                                                 algorithm of the agentic retrieval is given in AppendixA.
+Retrieval and Answering (R&A) Agent.To capture
+ordered causality duringreasoning, weemploya versatile                       4. Distribution Adaptability of Tree-RAG
+R&A agent that intelligently engages in multi-turn interac-                  This section analyzes the distribution adaptability of k -
+tionswiththeabstracttreeindex. Itfirstassesseswhetherthe                     means-type Tree-RAG and Ψ -RAG. Tree-RAG methods
+availableinformationissufficienttoanswertheuserquery                         like RAPTOR(Sarthi etal.,2024)build anequi-depth tree
+accurately or whether an additional retriever call is neces-                 index via bottom-upk -means-type clustering, such as the
+sary. The agent responseis a triplea=(R,<action>,·)                          GaussianMixtureModel(GMM).However,k -means-type
+wheretheactiontagiseither<answer>or<retrieve>.                               clustering tends to assign objects from major clusters to
+If <retrieve> is returned, the agent proposes a new                          minorones,resultinginclustersofrelativelyuniformsize
+queryq′and requests another retrieval. The newly retrieved                   even when the corpus follows a skewed distribution. This
+documents are then fed back to the agent alongside the                       is known as the “uniform effect” (Xiong et al.,2006;Liang
+original user query for the next reasoning step.                             etal.,2012;Assran etal.,2023). For RAG,thiseffectmay
+For each retrieval step,Ψ -RAG performs top-down dense                       cause the retriever to overlook chunks with minor themes.
+vector matching following (Sarthi et al.,2024).  Starting                    Incontrast,Ψ -RAGbetterpreservesskeweddistributionsin
+from the root, it computes the cosine similaritys(q,u)       be-             corpora. WecomparethetwotreeRAGframeworksthrough
+tweenthequeryvectorandeachcandidatenodeatlayerl,                             the lens of their optimization objectives.
+selecting the top-k  nodesU l. Then, all children of the se-
+lectednodesS      u∈U    l c(u)      becomethecandidatesforthenext           4.1. The Uniform Effect
+layer. This process iterates until the leaf layer is reached.
+Our agentic retrieval workflow is as follows. Given a user                   k -means-type tree index.A cluster can be defined as a
+queryq, an initial retrieval is invoked. The returned top-k                  family of leaf setsC={c=ℓ(T                 c)}   from an equi-depth
+chunksD ∗0 arefedtotheagent,yieldinga 1 =f(q       0;I(D     ∗0)).           forest{T c ⊆T|δ(T        c)=δ(T)−1}                . Ak -means-typecluster
+Then, “retrieval-generation” steps are iterated:                             tree searches for an optimalCby minimizing the objective
+
+                                   i[                                                                   kX   X
+ D ∗i =r(q      ′i,T),a      i+1   =f   q;(I(D     ∗j)∪a     j)∪I(D        ∗0)   (3)            L=               ∥x   i−µ    i∥2,                    (4)
+                                  j=1                                                                  i=1  x i∈c   i
+
+                                                                         4
+
+========== PDF PAGE 5 / 31 ==========
+                            Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+wherek=|C|     ,µ i = P               x i                                        minimization objective of AHC (Moseley & Wang,2017;
+                              x i∈c   in i is the clustercentroid and
+n i =|c     i|. Theorem4.1presents avariantof                    (4)    thatrevealsCharikar & Chatziafratis,2017;Chami et al.,2020).
+the “uniform effect” ink-means clustering.                                       Based on Dasgupta’s cost, we analyze two scenarios: (1)
+Theorem 4.1(Uniform effect of     k -means (Liang et al.,                        whetherΨ -RAG tends to build a tree with uniform leaf dis-
+2012)). GivenLin(4), we have                                                     tribution,and(2)whetheritadaptivelygeneratessubtreesof
+            L=−A         X         n in j∥µ   i−µ    j∥2 +B         (5)          varyingsizesforminorclusters. Ourfindingsareformalized
+                                                                                 in the following Theorems.
+                        1≤i<j≤k
+whereAandBare constants dependent only on the data.                              Theorem4.3(Non-uniformitypreferenceof     Ψ -RAG).Con-
+                                                                                 sider  a  3-layer  equi-depth  multifurcating  tree T   with
+See  SectionB.1for  the  proof.    Assuming                 n in j  and          a perfectly uniform leaf distribution among its subtrees
+∥µ   i−µ    j∥2 areindependent, maximizingthe termn in j in                      T1,···,T   k : n 1  =n    2  =···=n        k  =n/k      , where k≥3      ,
+(5)    leads to n 1  =n    2  =···=n        k  =n/k      . This indicates        n≥3k        . A new treeT ′ is constructed by moving one leaf
+thatk -means favors clusters of uniform size. (Proposition                       fromT     j to another subtreeT    i. Then:
+1, (Assran et al.,2023)) further notes that soft            k -means,i.e.,       (1)c(T        ′)<c(T);
+GMM, shares the same global optimum and the uniform                              (2) LetT=ψ(T              AHC) andT ′ =ψ(T       ′AHC), where ψ(·)      de-
+effect withk -means. Figure4showsa toy example where                             notesthe collapsingprocessfromabinary tree toanequi-
+k -meansgraduallyshiftstheminorclustercentroidtoward                             depth multifurcatingtree. Denoteby∆c    and∆c   ′the incre-
+the major class, inflating the minor cluster beyond its actual                   ments of Dasgupta’s cost onT  andT ′introduced byψ(·)     ,
+size. Thismayconfuseabstractnodesinatree indexwhich                              respectively. Then we havec(T           ′)−c(T)=∆c              ′−∆c.
+leads to semantic bias or neglect of minor nodes.                                Theorem4.4(Distributionadaptabilityof     Ψ -RAG).Con-
+                                                                                 sider a 3-layer equi-depth multifurcating treeT  with sub-
+                                                                                 treesT1,···,T   k  of any size where k≥3      . A subtree of a
+                                                                                 minor leaf clusterTi has2≤n      i <n   j,∀1≤j̸=i≤k                  . A
+                                                                                 new treeT ′ is constructed by moving one leaf from some
+                                                                                 subtreeT    j to the minor subtreeT    i. Then:
+                                                                                 (1)c(T        ′)≥c(T), andc(T                   ′)=c(T)iffn             j =n    i +1;
+                                                                                 (2) LetT=ψ(T              AHC),T ′ =ψ(T       ′AHC) and∆c,∆c        ′ defined
+                                                                                 asinTheorem4.3. Thenwehave         ∆c   ′≥∆c       ,and∆c   ′=∆c
+                                                                                 iffn  j =n    i +1.
+
+                                                                                 SeeSectionB.2andSectionB.3fortheproofsandremarks.
+                                                                                 TheabovetheoremsprovethatΨ -RAGincursalargerincre-
+                                                                                 mentinDasgupta’scostfor(1)atreewithperfectlyuniform
+Figure 4.The uniform effect of   k -means clustering. Initial cen-               leafdistribution,and(2)atreewherenodesfrommajorclus-
+troids are set at the center of each class (step 0).  As iteration               tersareassignedtoaminorcluster. TheyshowthatΨ -RAG
+proceeds, more major class nodes are misassigned to the minor                    does not suffer from the uniform effect and, furthermore,
+cluster, eventually shifting the minor centroid (step 12).                       adaptively preserves skewed distributions within corpora.
+
+Ψ -RAG’s hierarchical index. Ψ -RAG is inspired by ag-                           4.2. Visualization Study on Skewed Data
+glomerative hierarchical clustering (AHC) (Florek et al.,
+1951;Sokal & Michener,1958), a greedy heuristic algo-                            We conduct a visualization study by constructing tree in-
+rithmwithoutanexplicitoptimizationobjective. Wethere-                            dexes with both RAPTOR andΨ-RAG on skewed datasets
+fore adopt a widely used metric for evaluating AHC.                              tovalidatetheaboveconclusions. Threeskeweddatasetsare
+Definition 4.2(Dasgupta’s cost (Dasgupta,2016)). For a                           generated from MultiHop-RAG (Tang & Yang,2024): each
+treeT, the Dasgupta’s cost is defined as                                         combinesthefirst5documentsfromoneofthreecategories:
+                                                                                 “Business”,“Entertainment”,or“Technology”,withthefirst
+         c(T)=        X         d(u     i,u j)|ℓ(LCA(u                 i,u j))|      (6)50 documents from the semantically distant “Sports” class,
+                    1≤i<j≤n                                                      asshowninFigure5(a). Weextractthebottomfourlayers
+whered(·,·)is a distance function.                                               of each tree and visualize them as circular trees.
+                                                                                 TheresultsinFigure5(b)revealthatmajorabstractnodes
+The intuition is that semantically similar points (with small                    in RAPTOR tend to be confused with (i.e., share a parent
+d) should have a deeper LCA,i.e.,be placed closer in the                         with)minoronesespeciallyathigherlayers,whichisaman-
+tree.  Dasgupta’s cost is widely regarded as the implicit                        ifestation of the uniform effect. In contrast,Ψ -RAG assigns
+
+                                                                             5
+
+========== PDF PAGE 6 / 31 ==========
+                         Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure5.RAPTORvs.   Ψ  -RAGonskeweddistributions. (a)2-dimensionalembeddingspaceofthefourmaincategoriesofMultiHop-
+RAG. (b)Circulartreevisualizations(onlyregions containingminorclassnodesareshown). Theoutermostringrepresentsleafnodes.
+ForS[:50]+B[:5],redpointsrepresent“Sports”nodes,whilebluepointsandedgestraceroot-to-leafpathsfor“Business”nodes. Thered
+shaded area indicates the retrieval noise introduced by confused nodes (/times). Comparing the number of confused nodes and the size of the
+shaded areas,Ψ-RAG organizes minor classes more effectively.
+
+far fewer major abstract nodes to minor ones, resulting in                MultihopQA) (Ho et al.,2020), and MuSiQue (Trivedi
+anintuitivelysuperiorindexstructure. Adetailedcasestudy                   et al.,2022). We also include the first1,000 questionsfrom
+oftheconfusedabstractsanditsnegativeeffectonretrieval                     MultiHop-RAG (Tang & Yang,2024), a multi-hop bench-
+is provided in AppendixD.2.                                               mark containing negative samples.  For narrative QA, 10
+                                                                          longdocumentsarerandomlysampledfromNarrativeQA
+5. Experiments                                                            (Ko ˇcisk`y et al.,2018). We also use the first 100 documents
+                                                                          fromtheLongBooksubsetin∞  Bench(Zhangetal.,2024a),
+5.1. Experimental Setup                                                   anarrativeQAdatasetfeaturingsignificantlylongerdocu-
+Tasks and evaluation metrics.Our evaluation encom-                        ments. Forsummarization,weadoptQMSum(Zhongetal.,
+passesfourtypesoftasks. (1)Single-hopandmulti-hopQA                       2021) and WCEP (Ghalandari et al.,2020). Overly short
+(token-level factanswering) involvesdetailed facts within                 documentsare filteredoutfollowing(Zhanget al.,2025a).
+oneormultiplepassagesunderacross-documentsetting. A                       Further dataset details are provided in AppendixC.
+wordoraphraseisrequiredasananswer. WeuseRecall@k                          Baselines.Our baselines cover various RAG paradigms.
+(k= 2,5        ) for retrieval metrics and use Exact Match (EM)           (1)Traditional RAG: thesparse retriever BM25(Robertson
+andF1scoreforQA.(2)NarrativeQA(passage-levelcausal                        et al.,2009), the dense vector retriever DPR (Karpukhin
+reasoning) requires the model to identify causal relation-                et al.,2020) with Faiss (Douze et al.,2025), and the strong
+shipswithin asingle longdocumentfor anarrativeanswer.                     hybridretrieverBM25+DPRequippedwithareranker. An-
+Given the variable answer length, we employ F1 and the                    otherbaselineinvolvesDPRequippedwithaniterativeagen-
+Recall-Oriented Understudy for Gisting Evaluation using                   tic retriever IRCoT (Trivedi et al.,2023). (2) Graph-RAG:
+the LongestCommon Subsequence (ROUGE-L) asmetrics.                        GraphRAGfromMicrosoft(Edgeetal.,2024),thestate-of-
+(3) Document-level summarization requires a comprehen-                    the-artframeworkHippoRAG22 (Jim ´enezGuti´errezetal.,
+sive understanding of asingle long documentin response                    2025),andGoR(Zhangetal.,2025a),anewsummarization-
+to a fixed query: “Summarize the contents of this meeting                 exclusiveGraph-RAGframework. (3)Tree-RAG:RAPTOR
+/ news event”. Iterative retrieval and the sparse index are               (Sarthi et al.,2024), the only open-source framework that
+disabled for this task. Given the variable answer length and              can be technically implemented to a corpus-level index.
+format, we use ROUGE-L as the metric.                                     Implementation details. Ψ -RAG (and all dense retrieval
+Datasets.Each task is evaluated on multiple benchmark                     baselines) by default uses Qwen3-Embedding-8B (Q3-8B)
+datasets. For single-hop and multi-hop QA, we mainly fol-                 (Zhangetal.,2025b)astheencoderandLlama-3.3-70B(L3-
+lowHippoRAG2(Jim ´enezGuti´errezetal.,2025)anduse                         70B)(Dubeyetal.,2024)astheabstractionandR&Aagent.
+1,000randomlysampledqueriesfrom(1)single-hop: NQ                          We use BM25S (L `u,2024) as the BM25 implementation.
+(Kwiatkowskietal.,2019)andPopQA(Mallenetal.,2023);                            2Wereportboth theoriginalsetting(with NV-Embed-V2(Lee
+(2)multi-hop: HotpotQA(Yangetal.,2018),2Wiki(2Wiki-                       et al.,2025)) and our setting with Q3-8B and Q3R.
+
+
+                                                                       6
+
+========== PDF PAGE 7 / 31 ==========
+                                                   Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+                            Table 2.Single- and multi-hop QA results in EM (%) and F1 (%). Best results are inbold. Second-bests are underlined                                               .
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                  Table 3.Retrieval results for single- and multi-hop QA in Recall@2 (R@2%) and Recall@5 (R@5%).  Best results are inbold.
+                  Second-bests are underlined.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                  Ψ -RAG is equipped with Qwen3-Reranker-8B (Q3R) to                                             On 5 out of 6 datasets, RAPTOR + Q3R underperforms
+                  fuse retrieval results from sparse and dense retrievers. For                                   DPR without a reranker, showing degradations exceeding
+                  a fair comparison, most baselines are also equipped with                                       25%inRecall@5and30%inF1onPopQA.Thishighlights
+                  Q3R. Detailed configurations and instruction prompts are                                       akeylimitationoftraditionalTree-RAG:astheindexspace
+                  provided in AppendixC.                                                                         expands, performance on factual QA is severely hampered
+                                                                                                                 by coarse-grained abstracts.
+                  5.2. Single- and Multi-Hop QA                                                                  (4)Ψ -RAGachievesstrongperformanceacrossbothtask
+                  Weuse thesymbols “ /file-alt”and “ ὑ1”to denote Ψ -RAG with                                    types.Compared to RAPTOR,         Ψ -RAG achieves average
+                  summative and keyword abstract, respectively.  Retrieval                                       gainsof25.9%inF1and23.7%inRecall@5,irrespective
+                  andQAresultsonsingle-hopandmulti-hopdatasetsarepre-                                            of the abstraction type. Notably, Ψ -RAG surpasses RAP-
+                  sented in Table2and3, yielding several key observations.                                       TOR by up to 54.78% in F1 on 2Wiki. To our knowledge,
+                  (1)Traditional baselinesexcel at single-hop QA.For fac-                                        Ψ -RAG is the first Tree-RAG to surpass advanced Graph-
+                  tual questions with little context such as NQ and PopQA,                                       RAG,outperformingHippoRAG2by7.4%andHippoRAG
+                  DPRand itshybridcombination withBM25achieverecall                                              2+Q3Rby9.9%inaverageF1. Wealsofindthatthesum-
+                  and accuracy competitive with HippoRAG 2 andΨ -RAG.                                            mativeabstractslightlyoutperformsthekeywordabstract.
+                  Insuchcases,answersoftenlieindocumentswithfrequent                                             Thisindicatesthatlogicalrelationshipsbetweenentitiescan
+                  query-related entities or strong semantic correlation.                                         effectively compensate for abstract coarseness.
+
+                  (2)Multi-hopQAisthedomainofiterativeagenticRAG                                                 5.3. Narrative QA and Summarization
+                  andstructuredRAG.BothIRCoTandHippoRAG2out-                                                     Table4showstheperformanceofnarrativeQAandsumma-
+                  perform the hybrid retriever BM25 + DPR on 3 out of 4                                          rization. We derive the following observations:
+                  multi-hop datasets, with the highest F1 gains exceeding
+                  20%. Thisunderscores thenecessity of modelingimplicit                                          (1)Traditional baselines struggle to capture causal rela-
+                  entity relationships for multi-hop reasoning.                                                  tionships and high-level semantics.Unlike in token-level
+                  (3)RAPTOR’seffectivenessdiminishesatcorpusscale.                                               QA, BM25 and DPR achieve the lowest performance in
+                                                                                                                 most cases. This indicates that simple keyword matching
+
+
+    Type       Method                          NQ             PopQA         HotpotQA          2Wiki           MuSiQue      MultiHop-RAG     AverageType        Method                             NQ                PopQA            HotpotQA             2Wiki             MuSiQueAverage7
+                                            EM      F1      EM      F1      EM      F1      EM      F1      EM      F1      EM       F1R@2     R@5     R@2     R@5     R@2     R@5     R@2     R@5     R@2     R@5R@2     R@5EM       F1
+                BM25            45.4   56.76   40.9   49.01   43.8   54.07   34.7   36.90   13.0   17.96    2.5     3.93BM25             28.20    56.03    23.90    35.70    57.25    74.80    54.70    64.98    28.78    35.4038.57    53.3823.55   36.44
+TraditionalTraditionalDPR               46.0   59.09   47.2   55.89   52.0   63.10   39.9   43.13   18.7   24.03   41.3    42.72DPR                 27.13    69.51    20.85    49.70    35.25    86.75    32.30    71.03    33.11    48.0829.73    65.0140.85   47.99
+   RAGRAG       BM25+DPR+Q3R48.2   60.58   47.2BM25+DPR+Q3R46.29 76.6342.90    50.55    85.70    93.80    68.95    74.52    50.92    67.3556.01   58.4   70.98   41.6   45.43   28.3   34.81   52.9    53.4958.95    72.5746.10   53.55
+                DPR+IRCoT+Q3R50.1DPR+IRCoT+Q3R46.16  62.71 47.3  56.98 59.1   71.00   48.9   53.44   29.7   37.36   41.7    42.2876.10    42.75    50.45    84.50    92.40    69.20    74.08    50.90    66.0258.70    71.8146.13   53.96
+                GraphRAG            36.0   50.85   32.7   42.13   54.9   66.30   52.2   56.62   25.8   30.70   37.3    39.0884.05    94.40    75.40    89.92    55.67    73.7760.95    77.1939.82   47.61
+Graph-RAG   HippoRAG2          47.4   62.42   43.4   55.90   61.9  75.40 64.8   71.35   37.5   48.00                                        17.7    19.36        45.45   55.41
+Graph-RAG   HippoRAG2           45.32 77.11 44.30    50.75HippoRAG2+Q3R45.7   60.99   43.3   56.05   58.7   71.52   60.1   66.00   32.9   43.27   17.6    19.37HippoRAG2+Q3R42.09    73.68 46.60 50.45    74.70    90.65    70.00    80.73    49.02    64.6456.48    72.0343.05   52.87
+
+                RAPTOR+Q3R   43.5   55.40   19.8   25.76   43.1   52.54   19.1   22.16   16.6   21.10   42.5    43.20RAPTOR+Q3R   41.56    68.48    21.20    23.80    67.10    72.25    40.93    44.57    33.29    42.2640.82    50.2730.77   36.69
+ Tree-RAGTree-RAGΨ-RAG/file-altΨ-RAG/file-alt50.046.0863.4575.7246.7  43.3556.74 51.3062.1 74.5988.1569.196.00 76.7381.3538.7 96.1348.90 57.2155.3  75.7756.23 63.2353.65 78.9862.77
+                Ψ-RAGὑ1Ψ-RAGὑ1              50.645.8863.58 75.1346.1  42.6055.88 50.5562.2 74.8588.10 69.095.8076.9481.2337.9 95.8547.83 55.6954.1  75.0855.18  62.7053.32 78.4862.38
+
+========== PDF PAGE 8 / 31 ==========
+                                              Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+                 Table 4.Narrative QA results in F1 (%) and ROUGE-L (R-L%),                           Table 5.Query reorganization (QR) ablation in F1 (%).  Best
+                 andsummarizationresultsinROUGE-L(R-L%). Bestresultsare                                results are inbold.
+                 inbold. Second-bests are underlined          .
+
+
+
+
+
+                                                                                                       more effectively than the non-parametric RRF, but it does
+                                                                                                       not provide a core performance contribution inΨ-RAG.
+                                                                                                       (2)R&A agent isalso beneficial for single-hop QA.For
+                                                                                                       example, it brings a 1.89% F1 gain on NQ. This benefit
+                 andvectorsimilarityare insufficientfor passage-level and                              stems fromits query reorganization mechanism,which im-
+                 document-leveluserdemands. Onthecontrary,structured                                   proves retrieval for queries with insufficient context.
+                 indexesofRAPTORandGoRempowertheagentwithhigh-                                         Query reorganization.Table5evaluates a counterpart
+                 level information and thus higher performance on passage-                             ofΨ -RAGwithout queryreorganization, thatis, theR&A
+                 and document-level tasks.                                                             agentisnolongerencouragedtoreorganizeandenrichtheir
+                 (2)Ψ -RAGexcelsinbothnarrativeandsummarization                                        generated queries at each retrieval attempt. This leads to
+                 tasks.It consistently outperforms all baseline methods                                performancedegradationacrossmulti-hopdatasets,witha
+                 across both settings, surpassing RAPTOR by an average                                 2%F1droponMuSiQue. Therefore,thethematickeywords
+                 of 9.7% in F1 on NarrativeQA and∞  -LongBook. It also                                 andhigh-levelcontextintroducedbyqueryreorganization
+                 surpasses GoR by 3.2% in average ROUGE-L.                                             contribute to accurate hybrid retrieval ofΨ-RAG.
+
+                                                                                                      Table6.Experiment resultsof   Ψ  -RAGwithdifferentopen-source
+                                                                                                       backbones. Replaced components are            shaded.
+
+
+
+
+
+
+
+
+
+                                                                                                      Table7.Experimentresultsof   Ψ  -RAGwithdifferentclosed-source
+                                                                                                       R&A backbones.
+
+
+
+                                  Figure 6.Ablation studies in F1 (%).
+
+                 5.4. Ablation Studies
+                 Figure6presents the QA performance of            Ψ -RAG with
+                 different components ablated: the R&A agent, sparse re-                               5.5. Backbone Flexibility
+                 trieval (SR), and reranker (Q3R). We use RRF instead of                               Ψ -RAGcanflexiblyaccommodatedifferentbackbonelan-
+                 the reranker in the “w/o Q3R” setting. We have some key                               guage models for its embedding model, abstraction agent,
+                 observations:                                                                         R&A agent, and reranker. We select various open-source
+                 (1) Ψ -RAG achieves peak performance when all com-                                    models, including (1) Qwen3-Embedding-0.6B (Q3-0.6B)
+                 ponents are combined together.Our R&A agent consis-                                   (Zhang et al.,2025b) as the embedding model; (2) Llama-
+                 tently improves performance on multi-hop QA tasks with                                3.2-1B (L3-1B) and Llama-3.1-8B (L3-8B) (Dubey et al.,
+                 an average gain of∼ 20%. The contribution of sparse re-                               2024)astheabstractionagent;(3)Gemma-3-27B(G3-27B)
+                 trieval isalso significant,especially ondatasets likePopQA                            (Kamath et al.,2025) as the R&A agent; and (4) BGE-
+                 (+21.82%) and 2Wiki (+41.21%) with large amounts of                                   Reranker-Large (BGE) (Li et al.,2023) as the reranker.
+                 short factual questions related to specific names. This vali-                         The results are shown in Table6.  We observe that these
+                 dates its effectiveness in mitigating the coarse abstraction                          models, especially L3-1B/8B and BGE, serve as effective
+                 ofthetreeindex. Furthermore,despiteadditionalcomputa-                                 lightweightalternatives,astheyachievecomparableoreven
+                 tionalandstoragecosts,alargererankerintegratesretrievers                              superior performance with lower costs.
+
+                                                                                                   8
+
+Method                   NarrativeQA∞-LongBook    QMSum   WCEP
+                        F1      R-L      F1      R-L       R-L       R-L
+Embedding  Abstraction  R&A     Reranker    HotpotQA        2Wiki        MuSiQueBM25           13.95   14.07   14.87   15.54    15.63    16.08R@5    F1    R@5    F1    R@5    F1
+R&A                         HotpotQA         MuSiQueHotpotQA         2Wiki              MuSiQue          MultiHop-RAG
+Q3-8B      L3-70B      L3-70B  Q3R  95.80  74.85  95.85  76.94  75.08  47.83DPR              17.78   17.87   21.51   23.60    13.43     8.14R@5     F1     R@5     F1
+Q3-0.6B     L3-70B      L3-70B  Q3R  94.40  74.48  95.55  75.94  73.42  46.57BM25+DPR+Q3R20.30   20.37   24.46   24.87    13.42     8.14
+Ψ-RAG      74.85           76.94            47.83            55.18
+Q3-8Bw/oQR74.17(↓0.68)  76.71(↓0.23)  45.82(↓2.01)  55.03(↓0.15)GPT-5-mini 94.40   78.10   72.67   49.48L3-1B       L3-70B  Q3R  94.45  73.23  95.77  76.78  73.14  47.00
+Q3-8BGoR+Q3R                –         –         –         –      15.98    13.98L3-8B       L3-70B  Q3R  93.65  73.72  95.83  76.30  74.29  47.46
+Q3-8B      L3-70BRAPTOR+Q3R  21.36   21.61   13.90   15.85    16.53    18.33Gemini-2.5-Flash96.00   77.18   77.06   51.86G3-27B  Q3R  95.00  73.65  94.05  71.78  71.80  49.30
+Q3-8B      L3-70B      L3-70BΨ-RAG/file-alt27.84BGE 95.10  74.32  95.80  76.85  72.46  48.4028.4325.5227.1116.8720.28
+
+Ψ-RAGὑ1                27.66    28.35   28.44    28.36      16.65     18.81
+
+========== PDF PAGE 9 / 31 ==========
+                                               Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+                 Table 8.TimecostsofdifferentstructuredRAG.All experimentsfollowthesettingsinAppendixC.TheembeddingtimeofQ3-8Bfor
+                 HotpotQA and MuSiQue is 277.3s and 309.0s, respectively. L3-70B isused by default for abstraction of both RAPTOR andΨ  -RAG. “↑”
+                 and “↓” indicate a distinguishable higher and lower efficiency compared to RAPTOR + Q3R, respectively.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                 We also employ two popular closed-source LLMs:                             GPT-         HotpotQA), so we believe that it is justified in quality im-
+                 5-Mini(OpenAI,2025)and                     Gemini-2.5-Flash(Comanici                    provement for complex queries.
+                 et al.,2025), as the R&A agent in            Ψ -RAG. The results                        Considering thelimitations ofsimilarity ranking whenap-
+                 are presented in Table7.  Even with a much smaller size                                 pliedtoindustrial-scalecorporawith10M+andeven100M+
+                 than L3-70B, both models yield certain improvements in                                  tokens, we further propose two efficient tree-building ex-
+                 F1score. Forinstance,employingGemini-2.5-Flash asthe                                    tensions forΨ -RAG:BucketingandApproximate Near-
+                 R&A agent achieves a notably high F1 score of 51.86%.                                   est Neighbor Search with Hierarchical Navigable Small
+                 5.6. Efficiency Analysis                                                                World(HNSW)(Malkov&Yashunin,2018). SeeAppendix
+                                                                                                         Efor details.
+                 AsΨ -RAG is basedon AHC,the computation,sorting, and                                    More experiment results.AppendixDprovides more
+                 storage of the similarity matrix introduce time and space                               extensive results, including case studies, failure studies,
+                 complexitiesofO(n      2 logn)        andO(n      2),respectively3. Sim-                and more analyses towards the effectiveness of Ψ -RAG
+                 ilarly,theiterativemergingandcollapseprocesstakesO(n      2)                            components.
+                 time. However, the highly optimized matrix multiplication
+                 andsortingtechniquesmakeourproposedframeworkstill                                       6. Conclusion
+                 efficient for a domain-specific index.
+                 Table8compares the time efficiency ofΨ-RAG with other                                   We proposeΨ -RAG, a hierarchical Tree-RAG framework
+                 baselinemethods. Ourabstracttreeindexingisveryfast,tak-                                 supportingcorpus-levelindexingandcross-documentmulti-
+                 ing only 258 seconds on MuSiQue with 1.3 million tokens                                 hop user questions. By a hierarchical clustering-based ab-
+                 (the similarity ranking process only takes∼ 30s), which is                              stract tree index and a multi-granular agentic retriever,Ψ -
+                 6.5×  faster than RAPTOR and considerably more efficient                                RAG addresses key limitations of k -means-type tree in-
+                 thanHippoRAG2ondomain-specificcorpora4. However,                                        dexessuchaspoordistributionadaptability,structuralisola-
+                 asΨ -RAG includesmore abstractnodes, ittakes moretime                                   tion, and coarse abstraction. Extensive experimental results
+                 forabstraction. Forretrievalefficiency,thetop-downsearch                                demonstrate thatΨ -RAG achieves substantial gains across
+                 algorithm inherently hasO(logn)             complexity, resulting in                    tasks of diverse granularities, promoting the development
+                 lower averageretrievallatencycompared toHippoRAG2.                                      of tree-RAG in the rapidly evolving era of LLMs.
+                 WhileΨ -RAG’siterative agenticretrieval processincreases
+                 the latency, it isproportional to thecomplexityof the user                              Acknowledgements
+                 demand (one additional retrieval attemptopportunity only
+                 brings an increment of 0.46s compared to RAPTOR on                                      ThisworkwaspartiallysupportedbytheGuangdongProvin-
+
+                     3We omit the vector dimensiond asd≪n        in the real-world                       cial Natural Science Foundation General Program (Grant
+                 scenario.                                                                               No. 2026A1515012118).
+
+                     4Existing Graph-RAG papers tend not to include OpenIE ex-                           WethankLinxiaoCaoforhisassistanceinthecomparative
+                 traction in the calculation of indexing time. This may lead to a                        experiment. We also thank the anonymous reviewers, the
+                 significant inconsistency between thereported timeand the actual                        AssociateChair,theProgramChair,etc. fortheirconstruc-
+                 running time.                                                                           tive feedback and recognition of this work.
+
+
+
+
+      Method                             Indexingtime                                   Averagesingleretrievaltime                                  AverageQAtimeHotpotQA                 MuSiQue                  HotpotQA                  MuSiQue                 HotpotQA                  MuSiQue9
+
+                     OpenIE:105,360s         OpenIE:128,192s
+   HippoRAG2         Graphindexing:32,187s   Graphindexing:20,668s    Graphretrieval:10.44s↓↓ Graphretrieval:8.94s↓↓ 19.24s↓                17.56s↓
+                     Total:137,547s↓↓        Total:148,860s↓↓
+                     Treeindexing:1,123s     Treeindexing:1,684s      Treeretrieval:0.22s      Treeretrieval:0.22s
+  RAPTOR+Q3R         Abstraction:5,509s      Abstraction:7,570s       Reranking:0.98s          Reranking:2.17s         Singleretrieval:8.03s      Singleretrieval:12.71s
+                     Total:6,632s            Total:9,254s             Total:1.20s              Total:2.39s
+                     Treeindexing:124s↑      Treeindexing:258s↑       Treeretrieval:0.19s      Treeretrieval:0.19s
+      Ψ-RAG          Abstraction:10,425s↓    Abstraction:11,899s↓     Sparseretrieval:<0.01s   Sparseretrieval:<0.01s  Agenticretrieval:8.49s    Agenticretrieval:19.66s↓
+                     Total:10,549s↓          Total:12,157s↓           Reranking:0.79s          Reranking:1.07s↑
+                                                                      Total:0.98s↑             Total:1.26s↑
+      Ψ-RAG          Treeindexing:128s↑      Treeindexing:265s↑       Treeretrieval:0.19s      Treeretrieval:0.19s
+(Abstraction:L3-8B;  Abstraction:2,058s↑     Abstraction:2,222s↑      Sparseretrieval:<0.01s   Sparseretrieval:<0.01s  Agenticretrieval:5.45s↑  Agenticretrieval:7.17s↑
+R&AAgent:G3-27B;     Total:2,186s↑           Total:2,487s↑            Reranking:0.56s↑         Reranking:0.37s↑
+  Reranker:BGE)                                                       Total:0.75s↑             Total:0.56s↑
+
+========== PDF PAGE 10 / 31 ==========
+                         Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+Impact Statement                                                            Conference on EmpiricalMethods inNatural Language
+Thisworkfocusesonretrieval-augmentedgeneration(RAG)                         Processing, pp. 15159–15177, 2024.
+
+for large language models (LLMs) with a structured in-                   Comanici, G., Bieber, E., Schaekermann, M., Pasupat, I.,
+dex.   While this work may have broad applications in                       Sachdeva,N.,Dhillon,I.,Blistein,M.,Ram,O.,Zhang,
+knowledge-intensivenatural languageprocessing tasks,we                      D., Rosen, E., et al.  Gemini 2.5: Pushing the frontier
+do not identify any societal impacts that extend beyond                     with advanced reasoning, multimodality, long context,
+those common to LLMs and retrieval systems.                                 and next generation agentic capabilities.arXiv preprint
+                                                                            arXiv:2507.06261, 2025.
+References                                                               Cormack,G.V.,Clarke,C.L.,andBuettcher,S. Reciprocal
+Arivazhagan, M. G., Liu, L., Qi, P., Chen, X., Wang, W. Y.,                 rank fusion outperforms condorcet and individual rank
+  and Huang, Z.  Hybrid hierarchical retrieval for open-                    learning methods.  InProceedings of the 32nd interna-
+  domain question answering.  InFindings of the Asso-                       tional ACMSIGIR conference onResearch and develop-
+  ciation for Computational Linguistics:  ACL 2023, pp.                     ment in information retrieval, pp. 758–759, 2009.
+  10680–10689, 2023.                                                     Dasgupta,S. Acostfunctionforsimilarity-basedhierarchi-
+
+Asai, A., Wu, Z., Wang, Y., Sil, A., and Hajishirzi, H. Self-               calclustering. InProceedingsof theforty-eighthannual
+  RAG:Learningtoretrieve,generate,andcritiquethrough                        ACM symposium on Theory of Computing, pp. 118–127,
+  self-reflection. InProceedings of the 12th International                  2016.
+  Conference on Learning Representations, 2024.                          Douze, M., Guzhva, A., Deng, C., Johnson, J.,Szilvasy,G.,
+
+Assran,M.,Balestriero,R.,Duval,Q.,Bordes,F.,Misra,I.,                       Mazar´e, P.-E., Lomeli, M., Hosseini, L., and J´egou, H.
+  Bojanowski, P., Vincent, P., Rabbat, M., and Ballas, N.                   TheFaisslibrary.IEEETransactionsonBigData,2025.
+  Thehidden uniformcluster priorinself-supervised learn-                 Dubey,  A.,  Jauhri,  A.,  Pandey,  A.,  Kadian,  A.,  Al-
+  ing. InProceedings of the11th International Conference                    Dahle, A., Letman, A., Mathur, A., Yang, A., Fan, A.,
+  on Learning Representations, 2023.                                        et al.   The Llama 3 herd of models.arXiv preprint
+
+Banko, M., Cafarella,M. J., Soderland, S., Broadhead,M.,                    arXiv:2407.21783, 2024.
+  andEtzioni,O.Openinformationextractionfromtheweb.                      Edge, D., Trinh, H., Cheng, N., Bradley, J., Chao, A.,
+  InProceedingsofthe20thInternationalJointConference                        Mody, A., Truitt, S., Metropolitansky, D., Ness, R. O.,
+  on Artifical intelligence, pp. 2670–2676, 2007.                           and Larson, J. From local to global: A graph RAG ap-
+
+Bentley,J.L. Multidimensionalbinarysearchtreesusedfor                       proachtoquery-focusedsummarization.arXivpreprint
+  associativesearching.CommunicationsoftheACM,18                            arXiv:2404.16130, 2024.
+  (9):509–517, 1975.                                                     Fan, W., Ding, Y., Ning, L., Wang, S., Li, H., Yin, D.,
+
+Chami,I.,Gu,A.,Chatziafratis,V.,andR´e,C. Fromtreesto                       Chua,T.-S.,andLi,Q. AsurveyonRAGmeetingLLMs:
+  continuousembeddingsand back: Hyperbolichierarchi-                        Towardsretrieval-augmentedlargelanguagemodels. In
+  cal clustering. InProceedings of the 34th International                   Proceedings of the 30th ACM SIGKDD Conference on
+  Conference on Neural Information Processing Systems,                      KnowledgeDiscoveryandDataMining,pp.6491–6501,
+  volume 33, pp. 15065–15076, 2020.                                         2024.
+
+Charikar,M.andChatziafratis,V. Approximatehierarchical                   Fatehkia,  M.,  Lucas,  J. K.,  and Chawla,  S.    T-RAG:
+  clustering via sparsest cut and spreading metrics.   In                   lessons  from  the  LLM  trenches.arXiv  preprint
+  Proceedings of the 38th Annual ACM-SIAM Symposium                         arXiv:2402.07483, 2024.
+  on Discrete Algorithms, pp. 841–854. SIAM, 2017.                       Florek, K., Ł ukaszewicz, J., Perkal, J., Steinhaus, H., and
+
+Chen, B., Guo, Z., Yang, Z., Chen, Y., Chen, J., Liu, Z.,                   Zubrzycki, S. Surlaliaison etla division despointsd’un
+  Shi, C., and Yang, C.  PathRAG: Pruning graph-based                       ensemble fini. InColloquium Mathematicum, volume 2,
+  retrievalaugmentedgenerationwithrelationalpaths. In                       pp. 282–285, 1951.
+  Proceedings of the 40th AAAI Conference on Artificial                  Gao, L., Dai, Z., Chen, T., Fan, Z., Van Durme, B., and
+  Intelligence, 2026.                                                       Callan, J. Complement lexical retrieval model with se-
+
+Chen, T., Wang, H., Chen, S., Yu, W., Ma, K., Zhao, X.,                     mantic residualembeddings. In43rdEuropean Confer-
+  Zhang, H., and Yu, D. Dense X Retrieval: What retrieval                   ence on Information Retrieval, pp. 146–160. Springer,
+  granularity should we use? InProceedings of the 2024                      2021.
+
+                                                                     10
+
+========== PDF PAGE 11 / 31 ==========
+                         Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+Ghalandari,D.G.,Hokamp,C.,Glover,J.,Ifrim,G.,etal. A                      Jin, J., Zhu, Y., Dou, Z., Dong, G., Yang, X., Zhang, C.,
+  large-scalemulti-documentsummarizationdatasetfrom                          Zhao, T., Yang, Z., and Wen, J.-R. FlashRAG: A mod-
+  the Wikipedia current events portal. InProceedings of                      ular toolkit for efficient retrieval-augmented generation
+  the58thAnnualMeetingoftheAssociationforComputa-                            research. InCompanionProceedingsoftheACMonWeb
+  tional Linguistics, pp. 1302–1308, 2020.                                   Conference, pp. 737–740, 2025c.
+Guo,Z., Xia,L.,Yu,Y.,Ao,T.,andHuang, C. LightRAG:                         Jones, C. H.  Generalized hockey stick identities and n-
+  Simpleand fastretrieval-augmented generation. InFind-                      dimensional blockwalking.The Fibonacci Quarterly,34
+  ings of the Association for Computational Linguistics:                     (3):280–288, 1996.
+  EMNLP 2025, 2025.                                                       Kamath, A., Ferret, J., Pathak, S., Vieillard, N., Merhej,
+Gupta, N., Chang, W.-C., Bui, N., Hsieh, C.-J., and Dhillon,                 R.,  Perrin,  S.,  Matejovicova,  T.,  Ram´e,  A.,  Rivi`ere,
+  I. S. LLM-guided hierarchical retrieval.arXiv preprint                     M., et al.  Gemma 3 technical report.arXiv preprint
+  arXiv:2510.13217, 2025.                                                    arXiv:2503.19786, 2025.
+Ho, X., Nguyen, A.-K. D., Sugawara, S., and Aizawa, A.                    Karpukhin,V.,Oguz,B.,Min,S.,Lewis,P.,Wu,L.,Edunov,
+  Constructing a multi-hop QA dataset for comprehensive                      S., Chen, D., and Yih, W.-t.   Dense passage retrieval
+  evaluationofreasoningsteps. InProceedingsofthe28th                         foropen-domainquestionanswering. InProceedingsof
+  International Conference on Computational Linguistics,                     the 2020 Conference on Empirical Methods in Natural
+  pp. 6609–6625, 2020.                                                       Language Processing (EMNLP), pp. 6769–6781, 2020.
+Huang, H., Huang, Y., Yang, J., Pan, Z., Chen, Y., Ma,                    Khattab, O. and Zaharia, M.  ColBERT: Efficient and ef-
+  K., Chen, H., and Cheng, J.  Retrieval-augmented gen-                      fective passage search via contextualized late interaction
+  eration with hierarchical knowledge.arXiv preprint                         over BERT.  InProceedings of the 43rd International
+  arXiv:2503.10150, 2025.                                                    ACMSIGIRconferenceonresearchanddevelopmentin
+                                                                             Information Retrieval, pp. 39–48, 2020.
+Izacard,G.,Caron,M.,Hosseini,L.,Riedel,S.,Bojanowski,                     Koˇcisk`y,T.,Schwarz, J.,Blunsom, P., Dyer, C.,Hermann,
+  P., Joulin, A., and Grave, E. Unsupervised dense infor-                    K. M., Melis, G., and Grefenstette, E. The NarrativeQA
+  mationretrievalwithcontrastivelearning.Transactions                        reading comprehension challenge.Transactions of the
+  on Machine Learning Research, 2022.                                        Association for Computational Linguistics, 6:317–328,
+Jardine,N. andvan Rijsbergen,C. J. The useof hierarchic                      2018.
+  clustering in information retrieval.Information Storage                 Kwiatkowski, T., Palomaki, J., Redfield, O., Collins, M.,
+  and Retrieval, 7(5):217–240, 1971.                                         Parikh, A., Alberti, C., Epstein, D., Polosukhin, I., De-
+
+Jim´enez Guti´errez, B.,Shu, Y., Gu, Y., Yasunaga,M., and                    vlin, J., Lee, K., et al. Natural Questions: a benchmark
+  Su, Y. HippoRAG: Neurobiologically inspired long-term                      for question answering research.Transactions of the
+  memory for large language models.Proceedings of the                        Association for Computational Linguistics, 7:453–466,
+  38th Conference in Neural Information Processing Sys-                      2019.
+  tems, pp. 59532–59569, 2024.                                            Lee, C., Roy, R., Xu, M., Raiman, J., Shoeybi, M., Catan-
+
+Jim´enez Guti´errez, B., Shu, Y., Qi, W., Zhou, S., and Su,                  zaro, B., andPing, W. NV-Embed: Improved techniques
+  Y.  From RAG to memory:  Non-parametric continual                          for training LLMs as generalist embedding models. In
+  learningforlargelanguagemodels. InProceedingsofthe                         Proceedings of the 13th International Conference on
+  42nd International Conference on Machine Learning, pp.                     Learning Representations, 2025.
+  21497–21515, 2025.                                                      Lee, D., Hwang, S.-w., Lee, K., Choi, S., and Park, S. On
+Jin, B., Yoon, J., Han, J., and Arik, S. O.  Long-context                    complementarityobjectivesforhybridretrieval. InPro-
+  LLMs meet RAG: Overcoming challenges for long in-                          ceedings of the 61st Annual Meeting of the Association
+  puts in RAG. InProceedings of the 13th International                       for Computational Linguistics (Volume 1: Long Papers),
+  Conference on Learning Representations, 2025a.                             pp. 13357–13368, 2023.
+
+Jin,J.,Li,X.,Dong,G.,Zhang,Y.,Zhu,Y.,Wu,Y.,Li,Z.,                         Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V.,
+  Qi,Y.,andDou,Z. Hierarchicaldocumentrefinementfor                          Goyal,N.,K¨uttler,H.,Lewis,M.,Yih,W.-t.,Rockt¨aschel,
+  long-contextretrieval-augmentedgeneration. InProceed-                      T., et al. Retrieval-augmented generation for knowledge-
+  ings of the 63rd Annual Meeting of the Association for                     intensive NLP tasks.  InProceedings of the 34th Con-
+  Computational Linguistics (Volume 1: Long Papers), pp.                     ference on Neural Information Processing Systems, pp.
+  3502–3520, 2025b.                                                          9459–9474, 2020.
+
+                                                                      11
+
+========== PDF PAGE 12 / 31 ==========
+                         Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+Li,C.,Liu,Z.,Xiao,S.,andShao,Y. Makinglargelanguage                      Moseley,B.andWang,J.R. Approximationboundsforhi-
+  models a better foundation for dense retrieval.arXiv                      erarchicalclustering: averagelinkage,bisectingK-means,
+  preprint arXiv:2312.15503, 2023.                                          andlocalsearch. InProceedingsofthe31stInternational
+Li,M.,Miao,S.,andLi,P. Simpleiseffective: Therolesof                        Conference on Neural Information Processing Systems,
+  graphs and large language models in knowledge-graph-                      pp. 3097–3106, 2017.
+
+  based retrieval-augmented generation. InProceedings of                 Nair, I., Garimella, A., Srinivasan, B. V., Modani, N.,
+  the 13th International Conference on Learning Represen-                   Chhaya, N., Karanam, S., and Shekhar, S.   A neural
+  tations, 2025a.                                                           CRF-based hierarchical approach for linear text segmen-
+Li, X., Bai, Y., Jin, B., Zhu, F., Pan, L., and Cao, Y. Long                tation. InFindings of the Association for Computational
+  context vs. RAG: Strategies for processing long docu-                     Linguistics: EACL 2023, pp. 883–893, 2023.
+
+  mentsinLLMs. InProceedingsofthe48thInternational                       Omohundro, S. M.Five balltree construction algorithms.
+  ACM SIGIR Conference on Research and Development                          InternationalComputerScience InstituteBerkeley, 1989.
+  in Information Retrieval, pp. 4110–4113, 2025b.                        OpenAI.   Introducing GPT-5.   2025.   URL https://
+Li,X.,Dong,G.,Jin,J.,Zhang,Y.,Zhou,Y.,Zhu,Y.,Zhang,                         openai.com/index/introducing-gpt-5/.
+  P.,andDou,Z. Search-o1: Agenticsearch-enhancedlarge                    Peng, B., Zhu, Y., Liu, Y.,Bo, X., Shi, H., Hong, C., Zhang,
+  reasoningmodels. InProceedingsofthe2025Conference                         Y.,andTang,S. Graphretrieval-augmentedgeneration: A
+  onEmpiricalMethodsinNaturalLanguageProcessing,                            survey.ACMTransactionsonInformationSystems,2025.
+  pp. 5420–5438, 2025c.
+Li, Y., Zhang, W., Yang, Y., Huang, W.-C., Wu, Y., Luo,                  Rezazadeh, A., Li, Z., Wei, W., and Bao, Y.  From iso-
+  J., Bei, Y., Zou, H. P., Luo, X., Zhao, Y., et al.   To-                  lated conversations to hierarchical schemas: Dynamic
+  wards agentic RAG with deep reasoning: A survey of                        tree memory representation for LLMs. InProceedings of
+  RAG-reasoning systems in LLMs. InFindings of the As-                      the 13th International Conference on Learning Represen-
+  sociation for Computational Linguistics: EMNLP 2025,                      tations, 2025.
+  2025d.                                                                 Robertson, S., Zaragoza, H., et al. The probabilistic rele-
+Liang,J.,Bai,L.,Dang,C.,andCao,F. TheK-means-type                           vance framework: BM25 and beyond.Foundations and
+  algorithms versus imbalanced data distributions.IEEE                      Trends® in Information Retrieval, 3(4):333–389, 2009.
+  Transactions on Fuzzy Systems, 20(4):728–745, 2012.                    Sarthi, P., Abdullah, S., Tuli, A., Khanna, S., Goldie, A.,
+Liu, J.   LlamaIndex, 2022.   URL https://github.                           and Manning, C. D.  RAPTOR: Recursive abstractive
+  com/jerryjliu/llama_index.                                                processingfortree-organizedretrieval. InProceedingsof
+                                                                            the 12th International Conference on Learning Represen-
+Liu, Y., Hashimoto,K., Zhou,Y.,Yavuz, S.,Xiong, C.,and                      tations, 2024.
+  Yu, P. S.  Dense hierarchical retrieval for open-domain                Sokal, R. R. and Michener, C. D. A statistical method for
+  question answering. InFindings of the Association for                     evaluating systematic relationships. 1958.
+  Computational Linguistics: EMNLP 2021, pp. 188–200,
+  2021.                                                                  Sparck Jones,K. Astatistical interpretationof term speci-
+L`u,  X.  H.    BM25S:  Orders  of  magnitude  faster  lexi-                ficityanditsapplicationinretrieval.Journalofdocumen-
+  cal search via eager sparse scoring.arXiv preprint                        tation, 28(1):11–21, 1972.
+  arXiv:2407.03618, 2024.                                                Tang, Y. and Yang, Y.   MultiHop-RAG: Benchmarking
+Malkov, Y. A. and Yashunin, D. A.  Efficient and robust                     retrieval-augmentedgenerationformulti-hopqueries. In
+  approximatenearestneighborsearchusinghierarchical                         First Conference on Language Modeling, 2024.
+  navigable small world graphs.IEEE Transactions on                      Tao,  W.,  Xing,  X.,  Chen,  Y.,  Huang,  L.,  and Xu,  X.
+  Pattern Analysis and Machine Intelligence, 42(4):824–                     TreeRAG:Unleashingthepowerofhierarchicalstorage
+  836, 2018.                                                                for enhanced knowledge retrieval in long documents. In
+Mallen,A.,Asai,A., Zhong,V.,Das, R.,Khashabi,D.,and                         Findings of the Association for Computational Linguis-
+  Hajishirzi,H. When nottotrust languagemodels: Inves-                      tics: ACL 2025, pp. 356–371, 2025.
+
+  tigatingeffectivenessofparametricandnon-parametric                     Trivedi, H., Balasubramanian, N., Khot, T., and Sabharwal,
+  memories. InProceedingsofthe61stAnnualMeetingof                           A. MuSiQue: Multihop questions via single-hop ques-
+  the Association for Computational Linguistics (Volume 1:                  tion composition.Transactions of the Association for
+  Long Papers), pp. 9802–9822, 2023.                                        Computational Linguistics, 10:539–554, 2022.
+
+                                                                     12
+
+========== PDF PAGE 13 / 31 ==========
+                         Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+Trivedi, H., Balasubramanian, N., Khot, T., and Sabharwal,                 Computational Linguistics (Volume 1: Long Papers), pp.
+  A. Interleavingretrievalwithchain-of-thoughtreasoning                    15262–15277, 2024a.
+  for knowledge-intensive multi-step questions.  InPro-                  Zhang, X., Wang, M., Yang, X., Wang, D., Feng, S., and
+  ceedingsofthe61stannualmeetingoftheassociationfor                        Zhang, Y. Hierarchical retrieval-augmented generation
+  computational linguistics (volume 1: long papers), pp.                   model with rethink for multi-hop question answering.
+  10014–10037, 2023.                                                       arXiv preprint arXiv:2408.11875, 2024b.
+Wang,   S.,   Fang,   Y.,   Zhou,   Y.,   Liu,   X.,   and  Ma,          Zhang, Y., Li, M., Long, D., Zhang, X., Lin, H., Yang, B.,
+  Y.   ArchRAG: Attributed community-based hierarchi-                      Xie, P., Yang, A., Liu, D., Lin, J., et al. Qwen3 Embed-
+  cal  retrieval-augmented  generation.arXiv  preprint                     ding: Advancing text embedding and reranking through
+  arXiv:2502.09891, 2025.                                                  foundation models.arXiv preprint arXiv:2506.05176,
+Wei, J., Wang, X., Schuurmans, D., Bosma, M., Xia, F.,                     2025b.
+  Chi, E., Le, Q. V., Zhou, D., et al.  Chain-of-thought
+  prompting elicits reasoning in large language models. In               Zhao,Y.,Zhu,J.,Guo,Y.,He,K.,andLi,X. E2GraphRAG:
+  Proceedings of the 36th Conference in Neural Informa-                    Streamlining graph-based RAG for high efficiency and
+  tion Processing Systems, volume 35, pp. 24824–24837,                     effectiveness.arXiv preprint arXiv:2505.24226, 2025.
+  2022.                                                                  Zhong, M., Yin, D., Yu,T., Zaidi, A., Mutuma,M., Jha, R.,
+Wu, Y., Wang, Y., Ye, Z., Du, T., Jegelka, S., and Wang,                   Hassan, A.,Celikyilmaz, A., Liu,Y., Qiu, X.,et al. QM-
+  Y. When more is less: Understanding chain-of-thought                     Sum: A new benchmark for query-based multi-domain
+  lengthinLLMs. InICLR2025WorkshoponReasoning                              meetingsummarization. InProceedingsofthe2021 Con-
+  and Planning for Large Language Models, 2025.                            ferenceoftheNorthAmericanChapteroftheAssociation
+Xiao, Y., Dong, J., Zhou, C., Dong, S., Zhang, Q.-w.,                      for Computational Linguistics: Human LanguageTech-
+  Yin, D., Sun, X., and Huang, X.   GraphRAG-Bench:                        nologies, pp. 5905–5921, 2021.
+
+  Challenging domain-specific reasoning for evaluating
+  graph retrieval-augmented generation.arXiv preprint
+  arXiv:2506.02404, 2025.
+Xiong, H., Wu, J., and Chen, J.  K-means clustering ver-
+  susvalidationmeasures: adatadistributionperspective.
+  InProceedings ofthe12thACMSIGKDDinternational
+  conferenceonKnowledgediscoveryanddatamining,pp.
+  779–784, 2006.
+Yang,Z.,Qi,P.,Zhang,S.,Bengio,Y.,Cohen,W.,Salakhut-
+  dinov,R.,andManning,C.D. HotpotQA:Adatasetfor
+  diverse, explainable multi-hop question answering.  In
+  Proceedingsofthe2018conferenceonempiricalmethods
+  in natural language processing, pp. 2369–2380, 2018.
+Yao, S., Zhao, J., Yu, D., Du, N., Shafran, I., Narasimhan,
+  K. R., and Cao, Y.  ReAct: Synergizing reasoning and
+  acting in language models.  InProceedings of the 11th
+  International Conference on Learning Representations,
+  2022.
+Zhang,H.,Feng,T.,andYou,J. Graphofrecords: Boosting
+  retrieval augmented generation for long-context summa-
+  rization withgraphs. InProceedings ofthe 63rd Annual
+  MeetingoftheAssociationforComputationalLinguistics
+  (Volume 1: Long Papers), pp. 23780–23799, 2025a.
+Zhang,X.,Chen,Y.,Hu,S.,Xu,Z.,Chen,J.,Hao,M.,Han,
+  X.,Thai,Z.,Wang,S.,Liu,Z.,etal.∞  Bench: Extending
+  longcontextevaluationbeyond100ktokens. InProceed-
+  ings of the 62nd Annual Meeting of the Association for
+
+                                                                    13
+
+========== PDF PAGE 14 / 31 ==========
+                                Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+Appendix Contents
+
+A  Algorithms ofΨ-RAG                                                                                                                                                         15
+
+B   Theoretical Proofs                                                                                                                                                         16
+     B.1   Proof of Theorem4.1. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     16
+     B.2   Proof of Theorem4.3. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     17
+     B.3   Proof of Theorem4.4. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     20
+
+C   Detailed Experimental Setup                                                                                                                                       22
+     C.1   Dataset and Index Statistics. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     22
+     C.2   Configurations. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     22
+     C.3   Instruction Prompts. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     23
+
+D   Supplemental Experiments                                                                                                                                          25
+     D.1   Case Study. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     25
+     D.2   Analyses on Hierarchical Abstract Tree. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     27
+     D.3   Analyses on Multi-granular Agentic Retriever. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     27
+     D.4   Failure Analysis. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     28
+
+E   Real-World Extensions                                                                                                                                                 29
+     E.1   Approximate Nearest Neighbor Search for Efficient Indexing. . . . . . . . . . . . . . . . . . . . . . . .     29
+     E.2   Query Hop Discriminator. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .     29
+
+F   Related Work                                                                                                                                                                 30
+
+G  Discussion and Future Work                                                                                                                                        30
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                       14
+
+========== PDF PAGE 15 / 31 ==========
+                                 Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+A. Algorithms ofΨ-RAG                                                                           Algorithm 2Tree Retrievalr(q,T)
+Algorithm1shows the algorithm of Abstract Tree Indexing,                                            Input:query         q,treeindexT ,numberofretrievedchunks
+whileAlgorithm2andAlgorithm3showthealgorithmof                                                      k, maximum retrieval stepi         max
+Multi-granular Agentic Retrieval.                                                                   Initialize candidate nodesV           0 ={root(T)}
+                                                                                                    forl=0toδ(T)do
+Algorithm 1Abstract Tree Indexing                                                                       ifl=δ(T)and|{u|δ(u)=l}|≤kthen
+   Input:pairwise similarity matrixS                                                                        D ∗ =ℓ(T)
+   Descending sorts(i,j)for all1≤i<j≤n                                                                      break
+   InitializeT=(V=∅,E=∅)                                                                                else if|{u|δ(u)=l}|≤kthen
+   forrank(u,v)=1ton−1,(u,v)∈Sdo                                                                            V l+1   ={u|δ(u)=l+1}
+       ifp(u)=p(v)=∅then                                                                                    continue
+           Add nodeainVand setc(a)={u,v}                                                                end if
+       else ifroot(u)̸=root(v)andδ(u)=δ(v)then                                                          {Top-knearest neighbor search}
+           Addnodea inV  andsetc(a)={root(u),root(v)}                                                   U l =topk(V             l,q;k)
+       else ifroot(u)̸=root(v)andδ(u)>δ(v)then                                                          ifl=δ(T)then
+           c(p    δ(v)+1      (u))←c(p                δ(v)+1      (u))∪{root(v)}                            D ∗ =U   l
+       else ifroot(u)̸=root(v)andδ(u)<δ(v)then                                                          else
+           c(p    δ(u)+1      (v))←c(p               δ(u)+1      (v))∪{root(u)}                             V l+1   = S    u∈U    l c(u)
+       end if                                                                                           end if
+   end for                                                                                          end for
+   Tree rebalancing by splitting overload nodes                                                     Output:top-kchunksD                              ∗
+   Generate abstract text for every abstract node
+   Output:abstract treeT                                                                        Algorithm 3Multi-granular Agentic Retrieval
+                                                                                                    Input:user query          q, treeindexT , sparseindexI , LLM
+                                                                                                    agentf(·;I(·)), number of retrieved chunksk
+                                                                                                    {Hybrid retrieval}
+                                                                                                    InitializeD             ∗0 =r(q,T)∪r(q,I)
+                                                                                                    Current retrieval stepi=1
+                                                                                                    repeat
+                                                                                                        ifi=i       max    then
+                                                                                                            SetI(D        ∗i)such that<action>=<answer>
+                                                                                                        end if
+                                                                                                        Generatea                i =(R     i,<action>,·)from (3)
+                                                                                                        ifa   i =(R     i,<retrieve>,q                      ′i)then
+                                                                                                            D ∗i =r(q      ′i,T)∪r(q          ′i,I)
+                                                                                                            i←i+1
+                                                                                                        end if
+                                                                                                    untila         i =(R,<answer>,y)
+                                                                                                    Output:answery
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                           15
+
+========== PDF PAGE 16 / 31 ==========
+                                       Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+B. Theoretical Proofs
+B.1. Proof of Theorem4.1
+Theorem4.1(Uniform effect ofk-means (Liang et al.,2012)).GivenLin(4), we have
+
+                                                                           L=−A         X                   n in j∥µ   i−µ    j∥2 +B                                                            (7)
+                                                                                            1≤i<j≤k
+
+whereAandBare constants only relative to the data.
+
+Proof.  Letd(c    i,cj)=  P                    x i∈c   i,x j∈c   j ∥x   i−x    j∥2. Wefirstdenotethesumofallpairwisedistancesofdatasamplesx∈ℓ(T)
+withinkclusters as
+                                                                   nX     nX                                 kX
+                                                     P k =                     ∥x   i−x    j∥2 =                  d(c    i,ci)+2    X                    d(c    i,cj)                                         (8)
+                                                                 i=1    j=1                                i=1                           1≤i<j≤k
+Then, we are going to prove
+                                                                                                 kX     n
+                                                                                   P k =               n id(c    i,ci)+2L     ↔k  ,                                                                   (9)
+                                                                                               i=1
+where
+                                                                                 L ↔k   =    X                 n in j∥µ   i−µ    j∥2                                                                  (10)
+                                                                                              1≤i<j≤k
+with mathematical induction.
+Fork=1, we haveL          ↔1   =0as condition1≤i<j≤kcannot be met. SoP                                          1 = P                                     x,y∈ℓ(T)        ∥x−y∥          2 which meets (9).
+Fork=2, we have
+
+    P 2 =d(c        1,c1)+d(c        2,c2)+2d(c         1,c2)                                                                                                                        (11)X
+          =    X                 ∥x   i−x    j∥2 +    X                       ∥x   i−x    j∥2 +2   X                                   ∥x   i−x    j∥2                                                    (12)
+               1≤i<j≤n                   1                  1≤i<j≤n                   2                    1≤i≤n             11≤j≤n             2
+                                   n 1X                                                                           n 2X
+          =2(n       1 −1)                ∥x   i∥2 −4     X                    x ix j +2(n       1 −2)                  ∥x   i∥2 −4     X                    x ix j
+                                   i=1                       1≤i<j≤n                   1                         i=1                       1≤i<j≤n                   2
+                            n 1X                            n 2X                                      X
+              +2n     2           ∥x   i∥2 +2n     1              ∥x   i∥2 −4    X                               x ix j                                                                                  (13)
+                           i=1                             i=1                       1≤i≤n             11≤j≤n             2
+                                                                                                                                                                                                         
+                                           n 1X                                    X                                                           n 2X                                    X
+          =      2n(n       1 −1)n 1            ∥x   i∥2 −4·      nn 1                         x ix j     +       2n(n       2 −1)n 2             ∥x   i∥2 −4·      nn 2                        x ix j   
+
+                                          i=1                                 1≤i<j≤n                   1                                     i=1                                1≤i<j≤n                   2
+                                                                                                                                                                                                                 
+                                     n 1X                                                                        n 2X                                                                              X
+              +      2n   2n 1           ∥x   i∥2 +2     X                     x ix j    +  2n   1n 2              ∥x   i∥2 +2     X                     x ix j    −4    X                               x ix j  
+                                    i=1                        1≤i<j≤n                   1                      i=1                        1≤i<j≤n                   2            1≤i≤n             11≤j≤n             2
+                                                                                                                                                                                                                       (14)
+          =   n            X            ∥x   i−x    j∥2 +   n                 X            ∥x   i−x    j∥2 +2n     1n 2∥µ   1 −µ    2∥2                                                        (15)
+               n 1    1≤i<j≤n                   1                  n 2   1≤i<j≤n                   2
+
+          =   nn 1 d(c    1,c1)+   nn 2 d(c    2,c2)+2L     ↔2                                                                                                                         (16)
+
+which meets (9).
+Assume (9) holds withk=K−1. Then fork=K, we have
+
+                                                                    P K  =P     ˆiK−1      +d(c       i,ci)+2     X                        d(c    i,cj)                                                    (17)
+                                                                                                                         1≤j̸=i≤K
+
+                                                                                                             16
+
+========== PDF PAGE 17 / 31 ==========
+                                    Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+whereP            ˆiK−1       is the sum of pairwise distances withinK−1clusters excluding clusterc                               i fori=1,2,···,K.
+We sum up (17) for every clusterc                 i and get
+
+                                                                      KX                    KX
+                                                     KP     K  =           P ˆiK−1      +        d(c    i,ci)+4     X                 d(c    i,cj)                                            (18)
+                                                                     i=1                   i=1                         1≤i<j≤K
+
+With our assumption:
+                                           P ˆiK−1      =    X             n−n       i                                           n jn κ∥µ   j −µ    κ∥2                                    (19)
+
+                                                           1≤j̸=i≤K            n j    d(c    j,cj)+2      X1≤j<κ̸=i≤K
+
+So                                                                                                                                             
+                             KX                                       KX    n                                                                              kX
+                                  P ˆiK−1      =(K−2)                     n id(c    i,ci)+2     X                   n in j∥µ   i−µ    j∥2        +           d(c    i,ci),                  (20)
+
+                           i=1                                      i=1                              1≤i<j≤K                                             i=1
+and from (8), we have
+                                                                   KX                                    !            kX
+                                 KP     K  =(K−2)                         n                                  +2            d(c    i,ci)+4     X                 d(c    i,cj)                   (21)
+
+                                                                   i=1    n id(c    i,ci)+2L     ↔K                  i=1                        1≤i<j≤K
+                                                                   KX                                    !
+                                            =(K−2)                        n                                  +2P     K                                                                         (22)
+                                                                   i=1    n id(c    i,ci)+2L     ↔K
+
+                                                  KX    n
+                           ⇒   P    K  =                n id(c    i,ci)+2L     ↔K                                                                                                          (23)
+                                                 i=1
+So (9) holds. With (9), we can now writeLas
+
+                                                                      kX    X                                     kX   d(c    i,ci)
+                                                            L=                      ∥x   i−µ    i∥2 =   12                  n i                                                                 (24)
+                                                                     i=1   x i∈c   i                            i=1
+                                                                             kX     n                                             kX
+                                                                =    12n             n id(c    i,ci)+2L     ↔k          −  1n          L ↔k                                                      (25)
+                                                                           i=1                                                   i=1
+                                                                =−    1n L ↔k  +  P k2n   ,                                                                                                (26)
+
+which completes the proof withA=−                 1n  andB=          P k2n   .
+
+Remark.Theorem4.1provesthattheobjectiveof                            k -meansisessentiallymaximizingL ↔k   = P                                             1≤i<j≤k           n in j∥µ   i−µ    j∥2. If
+we assumen             in j and∥µ         i−µ    j∥2 is independent, the maximization ofn    in j leads ton    1 =n    2 =···=n        k =n/k.
+
+B.2. Proof of Theorem4.3
+We first introduce necessary lemmas for Theorem4.3and Theorem4.4.
+LemmaB.1(ModularityofDasgupta’scost(Dasgupta,2016)).Let                         Ta bethesubtreeinT  rootedatnodea. Ifadifferent
+treeT    ′is constructed by replacingT               a with another subtreeT    ′a  satisfyingℓ(T                 ′a )=ℓ(T       a), then
+
+                                                                           c(T    ′)=c(T)−c(T                  a)+c(T       ′a )                                                                (27)
+
+Proof.For any leaf pair where one leaf is insideT               ′a  and the other is outside, the leaf count of its LCA is given by
+
+                                        ccross(T  ′a ,T  ′\T  ′a )=       X                      |ℓ(LCA(u,v))|=n                      ′a +n    1 +n    2 +···                               (28)
+                                                                          u∈T         ′a ,v∈T           ′\T    ′a
+
+                                                                                                  17
+
+========== PDF PAGE 18 / 31 ==========
+                            Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+Here, the total number of leaves in the current subtree n ′a  =n    a  remains unchanged regardless of the subtree structure.
+Therefore:
+
+                                                 c(T    ′)=c(T       ′a )+c(T       ′\T  ′a )+c     cross(T  ′a ,T  ′\T  ′a )                                                   (29)
+                                                         =c(T       ′a )+c(T\T         a)+c     cross(T  a,T\T   a)                                                      (30)
+                                                         =c(T       ′a )+c(T)−c(T                  a)                                                                             (31)
+wherec(T\T                a)denotes the sum of costs among the subtrees ofTexcludingT                       a.
+
+Remark.The modularity of Dasgupta’s cost allows us to, without loss of generality, decompose the problem of computing
+the global cost into analyzing cost differences within corresponding subtrees.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure7.Illustrationof   ψ(·)     : bottom-uptraversalandcollapsing. NotethatbothT AHC andT  hereareunordered,sothepositionsofb and
+cinTdo not matter as long as they are children ofa.
+
+LemmaB.2establishes the connection between the equi-depth multifurcating tree ofΨ-RAG and the binary tree of AHC.
+Lemma B.2(Connection between AHC and     Ψ -RAG). There exists a surjection     ψ:T      AHC7→T   that maps every binary tree
+T AHC to an equi-depth multifurcating treeTby iteratively performing node collapsing.
+
+Proof. Theproofisintuitive. First,themergingprocessofΨ -RAGisidenticaltothatinanAHCtree: bothofthemgroup
+two nodes under a common parent.
+We now focus on collapsing. As illustrated in Figure7, the process           ψ(T       AHC) can be viewed as a bottom-up layer-by-layer
+traversal process. Whenever a node is found whose subtrees have unequal depths, the root of the shallower subtree is
+collapsedtothecorrespondingnodeinthedeepestsubtree. Thisprocessiteratesuntileverynodehassubtreesofequaldepth.
+Therefore, anyT   AHC can always be mapped to an equi-depth multifurcating treeT=ψ(T                       AHC).
+
+Remark.LemmaB.2allows us to decompose                           ψ(T       AHC) bottom-up into a sequence of collapsing operations. Combined with
+LemmaB.1, itimplies that                ∆c=c(ψ(T                       AHC))−c(T              AHC) can be decomposed into a layer-by-layer summationof the cost
+increments introduced by node collapse. Moreover, it is obvious that Dasgupta’s cost is invariant to the order of children of
+a certain node, so∆cis invariant to the order of collapsing within a certain layer as well.
+In the following analysis, we follow the original paper (Dasgupta,2016) by considering a computablescenario where the
+distanced= 1     for all pairs of chunks. The subsequent conclusions demonstrate that this assumption does not affect our
+conclusionofΨ -RAG’sproperty. Toanalyzethenon-uniformitypreferenceof Ψ -RAG,LemmaB.3quantifiestheincrement
+in Dasgupta’s cost introduced by node collapse.
+Lemma B.3(Increment of Dasgupta’s cost of node collapse). The following holds:
+(1)ForaleafnodecollapsewithinatreeT ,letthetotalnumberofleavesbe|ℓ(T)|=n             ,andletTa bethesubtreerootedat
+the abstract nodea towhich theleaf nodeu  isbeing linked,with|ℓ(T     a)|=n       a. Thisintroduces anincrementof Dasgupta’s.
+cost∆c=          n a2
+(2) For an abstract node collapse within a treeT , let the number of leaves of the subtree to be collapsedTu  ben ′. Let
+Ta be thesubtree rootedat the abstract nodea to whichTu  is beinglinked.Ta hask  brancheswith the numberof leaves
+n 1,n 2,···,n  k , respectively. This introduces an increment of Dasgupta’s cost∆c=n              ′P                   1≤i<j≤k           n in j.
+
+                                                                              18
+
+========== PDF PAGE 19 / 31 ==========
+                                Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure8.DecompositionofDasgupta’scostfor(a)leafnodecollapseand(b)abstractnodecollapse. TheDasgupta’scostsofunmentioned
+components in the figure obviously remain invariant before and after the collapse.
+
+Proof.(1) From Fig8(a),
+                                 n a                                                                                                                   n a
+                      ∆c=          2     (n  a +1−n        a)  +n    a(n  a +1)−n          a(n+1)|{z  }  +n    a(n−n        a)(n+1−n)|{z      }  =       2                     (32)
+                               |             {z              }           ∆c(betweenuandT                         a )∆c(betweenT                  a  andT\T       a )
+                                       ∆c(withinT               a )
+(2) From Fig8(b),                                                          kX                                !
+                                                                                                   kX
+                                       ∆c=       X            n in j            n m  +n   ′−            n m      =n   ′  X            n in j                                    (33)
+                                                 1≤i<j≤k                 m=1                     m=1                     1≤i<j≤k
+                                                 |                             {z                             }
+                                                                 ∆c(between subtrees inT         a )
+which ends the proof.
+CorollaryB.4.BytheHockey-stickidentity(Jones,1996),thetotalcostincrementfromperforming                     n−2       consecutiveleaf
+collapses on a binary branch (resulting inn≥3leaves) is
+
+                                                                                  n−1X    i           n
+                                                                        ∆c=                2    =      3                                                                       (34)
+                                                                                  i=2
+The total cost increment from collapsingK−k(K >k≥2) identical subtrees onto nodea(resulting inKsubtrees) is
+                                                                                           
+                                                          K−1X                                           K−1X      X
+                                                ∆c=               n ′  X            n in j  =n   ′                         n in j                                              (35)
+
+                                                          κ=k           1≤i<j≤κ                          κ=k    1≤i<j≤κ
+
+Now we are ready for the following theorem.
+Theorem4.3(Non-uniformitypreferenceof         Ψ -RAG).Considera3-layerequi-depthmultifurcatingtree    T  withaperfectly
+uniformleafdistributionamongitssubtreesT1,···,T   k : n 1 =n    2 =···=n        k =n/k      ,wherek≥3      ,n≥3k        . AnewtreeT ′
+is constructed by moving one leaf fromT     j to another subtreeT    i. Then:
+(1)c(T        ′)<c(T);
+(2)LetT=ψ(T              AHC) andT ′=ψ(T       ′AHC). Denoteby∆c    and∆c   ′theincrementsofDasgupta’scostonT  andT ′introduced
+byψ(·), respectively. Then we havec(T                    ′)−c(T)=∆c              ′−∆c.
+
+Proof.(1) We visualize the scenario in Figure9. Letm=n/kand we can know from LemmaB.1that
+                                                                                   m                k
+                                                                   c(T)=k            2    m+         2   m  2n,                                                               (36)
+
+                                                                                        19
+
+========== PDF PAGE 20 / 31 ==========
+                                Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+
+
+
+
+
+
+
+
+
+
+
+                 Figure 9.An example of a uniform cluster tree (left) and moving a node fromT             j to another subtreeT              i (right).
+
+                                                m               m+1                              m−1
+                     c(T    ′)=(k−2)             2    m+             2        (m+1)+                 2        (m−1)
+                                        k−2
+                                  +         2       m  2n  +(m+1)(m−1)n+(k−2)(m+1)mn+(k−2)(m−1)mn              (37)
+                                      |       {z         }
+                                           0ifk=3
+So
+                                                                    c(T    ′)−c(T)=3m−n−1,                                                                 (38)
+which yieldsc(T            ′)<c(T)ifk≥3.
+(2)AccordingtoLemmaB.2,wecandecompose                ψ(·)      bottom-upintomultipleleafnodecollapsesandmultipleabstract
+node collapses. From CorollaryB.4, the total cost increments introduced byψ(T                                          AHC)andψ(T           ′AHC)are
+                                                               m              k−1X    i                  m             k
+                                                  ∆c=k           3     +m              2    m  2 =k        3     +     3    m  3,                                              (39)
+                                                                               i=2
+
+                                                  m            m−1                m+1                k−2                    k−2
+                          ∆c   ′=(k−2)             3      +         3        +        3         +        3       m  3  +        2       (m−1)m               2
+                                                             |     {z      }                       |       {z       }     |             {z              }
+                                                               0ifm=3                                   0ifk≤4                       0ifk=3
+                                                                                                         
+                                                       k−2                                                                                                                     (40)
+                                    +(m+1)                    2       m  2  +(k−2)m(m−1)
+                                                        |       {z       }
+                                                             0ifk=3
+So we have
+                                                          ∆c   ′−∆c=3m−n−1=c(T                             ′)−c(T)                                                       (41)
+which ends the proof.
+
+Remark.Theorem4.3provesthatwhiletraditionalAHCassignsthesameDasgupta’scosttothetwodifferenttreestructures
+(c(T)−∆c=c(T                    ′)−∆c       ′), the collapsing process in Ψ -RAG results in a lower Dasgupta’s cost for the tree with a
+non-uniform leaf distribution. This indicates that there is no uniform effect for Ψ -RAG even when pairwise distances
+between leaf nodes are unsorted. Moreover, as the computation of Dasgupta’s cost can be decomposed into that of each
+subtree, our conclusions can be generalized to trees withδ >3.
+
+B.3. Proof of Theorem4.4
+Theorem4.4(Distribution adaptability of         Ψ -RAG).Consider a 3-layer equi-depth multifurcating tree    T  with subtrees
+T1,···,T   k  ofanysize wherek≥3      . Asubtreeofa minor leafclusterTi has2≤n      i <n   j,∀1≤j̸=i≤k                  . AnewtreeT ′
+is constructed by moving one leaf from some subtreeT    j to the minor subtreeT    i. Then:
+(1)c(T        ′)≥c(T), andc(T                   ′)=c(T)iffn             j =n    i +1;
+(2) LetT=ψ(T              AHC),T ′=ψ(T       ′AHC) and∆c,∆c        ′defined as inTheorem4.3. Then we have         ∆c   ′≥∆c       , and∆c   ′=∆c      iff
+n j =n    i +1.
+
+                                                                                        20
+
+========== PDF PAGE 21 / 31 ==========
+                                    Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+
+
+
+
+
+
+
+
+
+
+
+
+            Figure 10.An example of a tree with a minor subtreeT                    i (left) and moving a node from a major subtreeT              j toT    i (right).
+
+Proof.(1) We visualize the scenario in Figure10. So we have
+                                                               n i                n j
+                                               c(T)=             2     n i +        2     n j +n    i(n−n        i)n+n        j(n−n        j)n+C,                                     (42)
+                         n i +1                               n j −1
+        c(T    ′)=             2        (n  i +1)+                  2        (n  j −1)+(n         i−1)(n−n               i +1)n+(n             j −1)(n−n               j +1)n+C      (43)
+
+whereCis a constant that remains invariant to the structure change. So
+
+                                               c(T    ′)−c(T)=2n(n                    j −n    i−1)+      3n   2i +n    i−3n      2j +5n     j −22                                                             (44)
+
+Whenn           j =n    i +1,c(T        ′)−c(T)=0. Whenn                          j =n    i +xwherex>1, then
+
+                                      c(T    ′)−c(T)=2n(x−1)+                        3n   2i +n    i−3(n        i +x)      2 +5(n       i +x)−22                                                                     (45)
+
+                                                               =      2n−3n           i−  3x−2  2          (x−1)                                                                       (46)
+                                                                                                                                                 
+                                                               =    2    n i +n    i +x+     X               n o   −3n      i−  3x−2      2        (x−1)                            (47)
+
+                                                                                                       o̸=i,j
+                                                                                                              
+                                                               =    n i +2  X             n o +  x2  +1         (x−1)                                                               (48)
+
+                                                                                  o̸=i,j
+                                                               >0                                                                                                                         (49)
+which yieldsc(T            ′)>c(T).
+(2) From CorollaryB.4, the total cost increments introduced byψ(T                                          AHC)andψ(T           ′AHC)are
+                                                                         n i            n j
+                                                            ∆c=            3      +        3      +(n−n          i−n    j)n  in j +C,                                                  (50)
+                                                         n i +1                n j −1
+                                           ∆c   ′=             3         +           3          +(n−n            i−n    j)(n    i +1)(n        j −1)+C                                  (51)
+                                                                             |      {z       }
+                                                                                0ifn     j=3
+whereCisa constant that remains invariant to the structure change. So
+
+                                                    ∆c   ′−∆c=(n             j −n    i−1)             n−n       i−n    j −  n i +n    j2      +1                                                     (52)
+
+Whenn j =n    i +1  ,∆c   ′−∆c=0          . Whenn j is larger,n j −n    i−1>0         , sowe focuson the secondpart ofthe righthand
+side. We consider the minimum case ofn=n          i +n    j +n    j and
+                                                                                                              n j −n    i
+                                                             ∆c   ′−∆c=(n             j −n    i−1)                   2      +1           >0                                                  (53)
+
+which ends the proof.
+
+                                                                                                    21
+
+========== PDF PAGE 22 / 31 ==========
+                               Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+                                                                    Table 9.Statistics of datasets.
+
+               Dataset                       Task type         Index scale     #Queries     #Documents     Average #tokens per document
+               NQ                         Single-hop QA        Corpus              1,000                9,633                                         141.330
+               PopQA                  Single-hop QA        Corpus              1,000                8,676                                         136.536
+               HotpotQA              Multi-hop QA         Corpus              1,000                9,811                                         131.602
+               2Wiki                     Multi-hop QA         Corpus              1,000                6,119                                         110.436
+               MuSiQue               Multi-hop QA         Corpus              1,000              11,656                                         114.516
+               MultiHop-RAG      Multi-hop QA         Corpus              1,000                   609                                       2346.064
+               NarrativeQA           Narrative QA         Passage                293                     10                                    62,824.500
+               ∞-LongBook         Narrative QA         Passage                100                     19                                  214,711.895
+               QMSum                Summarization        Passage                  35                     35                                    14,375.543
+               WCEP                   Summarization        Passage                119                   119                                      9,567.235
+
+
+                                                    Table 10.Statistics of abstract tree indexes ofΨ-RAG.
+
+                         Dataset                  #Trees     #Average               #Average             Average                    Average
+                                                               leaf nodes        abstract nodes         tree depth            compression rate
+                         NQ                                 1            9,633                   3,164                   6     82.35%/file-alt/ 83.06%ὑ1
+                         PopQA                           1            8,676                   2,810                   5     83.26%/file-alt/ 81.87%ὑ1
+                         HotpotQA                      1            9,811                   2,635                   6     85.98%/file-alt/ 85.85%ὑ1
+                         2Wiki                             1            6,119                   1,704                   5     82.14%/file-alt/ 82.89%ὑ1
+                         MuSiQue                       1          11,656                   2,938                   6     84.79%/file-alt/ 83.09%ὑ1
+                         MultiHop-RAG              1          16,349                   4,377                   6     78.94%/file-alt/ 78.87%ὑ1
+                         NarrativeQA                10               411                        85                3.5     90.71%/file-alt/ 98.25%ὑ1
+                         ∞-LongBook              19            2,446                      488                4.2     84.36%/file-alt/ 84.31%ὑ1
+                         QMSum                       35               155                        41                3.3     82.19%/file-alt/ 82.33%ὑ1
+                         WCEP                        119               109                        33                3.2     76.32%/file-alt/ 76.35%ὑ1
+
+
+
+Remark.Theorem4.4proves that                            Ψ -RAG incurs a larger cost to assign a major cluster node to a minor cluster. For a minor
+classinacorpuswithclusterc={u|∃v∈c,d(u,v)<d(u,w)∀w /∈c}                                               ,italwaysformaminorsubtreeinT  followingthe
+similarityrankinganditerativemerging& collapseprocessesofΨ -RAG.Inconclusion,Ψ -RAGtendstopreservethe size
+ofminorclassesinaskewedcorpus. AsthecomputationofDasgupta’scostcanbedecomposedintothatofeachsubtree,
+our conclusions can be generalized to trees withδ >3.
+
+C. Detailed Experimental Setup
+
+C.1. Dataset and Index Statistics
+Statistics of datasets.We provide the statistics of datasets used in our experiments in Table9.
+Datasetsplit.Wefollow RAPTOR’sdocument splittingstrategy, segmentingdocumentsinto chunksofapproximate 100
+tokens without cutting mid-sentence. Notably, we do not re-split datasets composed of similarly sized paragraphs: NQ,
+PopQA, HotpotQA, 2Wiki, and MuSiQue.
+Statisticsofabstracttrees.Weprovidethestatisticsof      Ψ -RAG’sabstracttreeindexesforeachdatasetinTable10. The
+resultsshow thatfor corpus-level datasets,the treedepth ofΨ -RAGstabilizes at5 to6 layers. ThisdemonstratesΨ -RAG’s
+key advantage of generalization ability: it does not require prior assumptions about data, as it naturally uncovers the
+underlying semantic hierarchy.
+
+C.2. Configurations
+Indexing setup.We set the maximum token length of the summative abstract for each abstract node to 100, and the
+maximumnumberofkeywordsofthekeywordabstractto20. Wesetthemaximumnumberofchildrennodesto40. Abstract
+nodes with excessive children will be split in half in the rebalancing process.
+The keyword abstractὑ1is used forΨ-RAG in all non-comparative experiments in this paper, unless otherwise stated.
+
+                                                                                      22
+
+========== PDF PAGE 23 / 31 ==========
+                                       Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+             Retrievalsetup.Wemainlyfollowthemulti-stepsettingofHippoRAG(Jim           ´enezGuti´errezetal.,2024)foragenticretrieval.
+             ForQAtasks,top-10retrievedpassagesfrombothsparseanddensetreeretrieversareintegratedandrerankedtothefinal
+             top-5 at eachretrieval step. We maintain a maximum score list for retrieved document chunksat each step and taketop-5
+             documentsfromthelistforrecall@k evaluation. Formulti-hopdatasets,welimitthemaximumnumberofretrievalattempts
+             (imax   +1  ) to be equal to the maximum hop count of user questions: 2 for HotpotQA and 2Wiki, 4 for MuSiQue and
+             MultiHop-RAG. For single-hop datasets (NQ and PopQA), though, we allow one extra retrieval attempt for possible query
+             reorganization. Forsummarizationdatasets,weperformsingleretrieval. Thek valueisdeterminedbythesizeofdocuments:
+             top-20 for QMSum and top-15 for WCEP.
+             LLMsetup.Allexperimentsare conductedonupto3 NVIDIAGeForceRTX4090GPUs with48GBVRAMeach. We
+             useOllama5 andHuggingFaceasdefaultLLMsources. WefollowthemajorityofdefaultsettingsofOllamaandHugging
+             Facemodels: forexample,thecontextwindowisfixedto4096tokens. Wesetthedecodingtemperatureto0andthepenalty
+             for generating repetitive content to 1.3 for every LLM. For the summarization task, the maximum LLM response token
+             length is determined by the size of documents: 200 for QMSum and 150 for WCEP.
+
+             C.3. Instruction Prompts
+             WeshowLLMpromptsusedforgeneratingsummativeabstract,keywordabstract,andR&Aagentbelow. Forsingle-hop
+             and multi-hop QA, we follow existing works and provide a one-shot in-context example.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+LLM Prompt for/file-altSummative Abstract
+
+                    ========================{System Instruction}========================
+As an advanced document summarization assistant, your task is to summarize the given list of documents, including as many key
+details and relationships as possible.
+(1) Your answer should always start with “Summary:”. NO UNNECESSARY WORDS: Always directly output the summary
+instead of useless modifiers like ‘Here is a summary of the given list ...’.
+(2) Be faithful to the original documents. Unnecessary paraphrasing and adding content not mentioned in the original documents
+are NOT allowed.
+(3)YoursummaryshouldbeNOMORETHAN{summary                         max   length}               WORDS.Keepinmindthatalongersummaryisnot
+always better.
+An in-context example is provided below.
+                   ========================{In-context example}========================
+/userUser input:
+Hotel Tallcorn
+The Hotel Tallcorn is located in Marshalltown, Iowa...
+The Oberoi Group
+The Oberoi Group is a hotel company with its head office in Delhi...
+Hotel Bond
+Hotel Bond is a historic hotel, built in two stages in 1913 and 1921...
+Mohan Singh Oberoi
+Rai Bahadur Mohan Singh Oberoi (15 August 1898 – 3 May 2002)...
+Ritz-Carlton Jakarta
+The Ritz-Carlton Jakarta is a hotel and skyscraper in Jakarta...5https://ollama.com/
+
+♂robotAssistant response:
+TheHotelTallcorninMarshalltown,Iowa,builtin1928,isnowanapartmentbuilding. Itwaspartofoneofthesecond-largesthotel
+salesin U.S.history in1956. HotelBond isa historichotelin Hartford,Connecticut, builtintwo stages. Afterfacingcompetition,
+it wentthrough multipleownership changes andbankruptcies. It isnowa Homewood Suitesby Hilton,with its ballroomhaving23
+reopenedin2001. TheOberoiGroup,foundedin1934,isaluxuryhotelcompanybasedinDelhi. Itownsandoperatesover30
+hotels and two cruise ships. It was founded by Mohan Singh Oberoi, who started India’s second-largest hotel company. The
+Ritz-Carlton Jakarta is a skyscraper hotel in Indonesia, opened in 2005. It consists of two towers, one for the hotel and one for
+apartments, and is located near the JW Marriott Hotel.
+
+========== PDF PAGE 24 / 31 ==========
+                                         Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+LLM Prompt forὑ1Keyword Abstract
+
+                     ========================{System Instruction}========================
+Asanadvanceddocumentsummarizationassistant,yourtask istosummarizethegivenlistoftext paragraphsintomultiplekey
+phrases or words. These key phrases include:
+· Key phrases that overview the types of information covered in the text;
+· Key phrases that reflect the common themes of these paragraphs;
+· Key phrases that distinguish the specific content of each paragraph.
+Requirements:
+(1) Generate key phrases mentioned above in order. All key phrases should be strictly formatted as ONE line of text, separated by
+commas, equivalent to the output format of Python code “‘,’.join(list                    of  keywords)”.
+(2) Different key phrases should be distinct from one another.
+(3) NO UNNECESSARY WORDS: Always output the direct key phrase list instead of useless modifiers like ‘Here are the keyLLM Prompt for R&A Agent in single-hop and multi-hop QA
+phrases according to the documents: ...’ or ‘Information key phrases: ... Theme key phrases: ...’.
+(4) The number of key phrases should be NO MORE THAN========================{System Instruction}========================{maxnumkeywords}.
+An in-context example is provided below.
+As an advanced reading comprehension and information retrieval agent, your task is to answer the user question by retrieving========================{In-context example}========================
+documents and multi-step reasoning, following the instructions below:
+(1) Yourresponse starts after “Thought: ”, where you will methodicallybreak downthe reasoning process, illustrating how you/userUser input:
+Hotel Tallcorn
+arrive at conclusions step-by-step. If you believe you have found the answer, conclude with “Answer: <answer>” to present a
+The Hotel Tallcorn is located in Marshalltown, Iowa...concise, definitive response.
+The Oberoi Group
+(2)Youcanrequestforretrievingsupportingdocumentsfromarelevantdatabaseamaximumof{max                                retrieval        time}           times.
+The Oberoi Group is a hotel company with its head office in Delhi...Some retrieved documents are provided the first time. When the question involves content you do not understand, or current
+Hotel Bond
+documents do not provide enough information, request retrieval by responding with “Retrieve: <retrieve                         query>”, where
+Hotel Bond is a historic hotel, built in two stages in 1913 and 1921...
+<retrieve       query>isa sub-questionderivedfrom theuserquestion, whichyou believe mustberesolvedtoanswer theuser
+Mohan Singh Oberoi
+question.
+(3)Theretrievalresultswillbeprovidedintheformat“Retrieveddocuments: ...”,andyoushouldcontinueyourreasoningbasedonRai Bahadur Mohan Singh Oberoi (15 August 1898 – 3 May 2002)...
+Ritz-Carlton Jakarta
+theuserquestion,yourpreviousreasoningsteps,andallretrieveddocuments. Obtain youranswerwithasfew retrievalattemptsas
+The Ritz-Carlton Jakarta is a hotel and skyscraper in Jakarta...possible,which meansyouneedto makeyour<retrievequery>asprecise aspossible. Ifnewlyretrieveddocuments donot
+help,tryreorganizingyour<retrieve              query>. Ifyourunoutofretrievalattemptsandstillcannotanswerthequestion,answer
+with “Not mentioned” only. Do NOT provide additional uncertain information.♂robotAssistant response:24
+(4) NO UNNECESSARY WORDS: After your reasoning, you MUST end your response with “Answer: <answer>” or “Re-historic hotels,hotel companies,bankruptcy and renovation,brand operations,Indian hospitality industry,Indonesia skyscraper,hotel
+locations,hotelbuildingtime,hotelarchitecture,hotelfounders,hotelownershiphistory,MarshalltownIowa,HotelTallcorn,Eppley
+trieve: <retrieve        query>” in a new line.  <answer> is in most cases a word or a phrase.  Avoid ambiguous words like
+“approximately”.Hotel Company,Sheraton sale,The Oberoi Group,Mohan Singh Oberoi,Hotel Bond,Hartford Connecticut,Bond Ballroom,Ritz-
+(5) Your “Thought: ” response should be NO MORE THANCarlton Jakarta{thought         max   length}WORDS.
+An in-context example is provided below.
+
+========== PDF PAGE 25 / 31 ==========
+                                        Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                    ========================{In-context example}========================
+/userUser input:
+Retrieved documents:
+Hotel Tallcorn
+The Hotel Tallcorn is located in Marshalltown, Iowa...
+Hotel Bond
+Hotel Bond is a historic hotel, built in two stages in 1913 and 1921...
+Ritz-Carlton Jakarta
+The Ritz-Carlton Jakarta is a hotel and skyscraper in Jakarta...
+User question: The Oberoi family is part of a hotel company that has a head office in what city?
+Retrieval time remaining:3
+Thought:
+♂robotAssistant response:D. Supplemental Experiments
+Accordingtotheuserquestion,IneedtofirstfigureoutthehotelcompanythattheOberoifamilyispartof. However,theretrievedD.1. Case Study
+documents do not include any details regarding the Oberoi family.
+Retrieve: Which hotel company is the Oberoi family part of?Wepresentamulti-hopexamplefromMuSiQueinTable11tointuitivelyillustratehow          Ψ -RAGperformsmulti-granular
+/userUser input:agenticretrieval ontheabstracttree. The question,“Whois the wifeofthe manwhoproducedthe documentaryofthepop
+Retrieved documents:starwhoinfluencedBeyonc´e?” requiresupto3hopstoanswer. Theexampleshowsthatthekeywordsretrievedby    Ψ -RAG
+LLM Prompt for R&A Agent in summarizationὑ1 at the first layer are relatively coarse, covering broad themes such as music, sports, and movies. With the search going
+The Oberoi Group
+The Oberoi Group is a hotel company with its head office in Delhi...deeperintothetree,thekeywordsbecomefiner-grained. Consequently,twosemanticallyrelatedretrievedchunkstellthat
+Mohan Singh Oberoithe required “man who produced the documentary” is David Gest.========================{System Instruction}========================
+Rai Bahadur Mohan Singh Oberoi (15 August 1898 – 3 May 2002)...
+Asan advanced readingcomprehension andinformation retrievalagent, yourtask isto answersummativeuser questionsbased
+User question: The Oberoi family is part of a hotel company that has a head office in what city?However, due tothe structural isolation,we still do notknow who isDavid Gest’swife, so the R&Aagent calls for asecond
+on retrieved documents. For each document, an [ID] is prepended to indicate the relative order in the document corpus. These
+Retrieval time remaining:retrievalattempt. Asthesecondquestionlackssufficientcontext,thecoarseabstractionintheuppertreelayersconfuses2
+documents provide a condensed version of the original long corpus to help you with summative tasks.
+Thought:
+Requirements:
+(1) Organize the documents to form a logically clear summary of the main content or plot of the original long corpus.♂robotAssistant response:25
+(2)Youranswershouldbecomprehensiveandcoherent. Yoursummativeanswershouldbeanindependentparagraph,enablingthe
+According to “Mohan Singh Oberoi”, Mohan Singh Oberoi is the founder and chairman of Oberoi Hotels & Resorts. From “The
+usertocomprehendthecontentorplotoftheoriginalcorpus. DoNOTincludeadditionaluncertainormade-upinformationinyour
+OberoiGroup”,OberoiHotels&Resorts isabrandanditscompany, TheOberoiGroup,isahotelcompanywithitsheadoffice in
+answer.
+Delhi.
+(3) Your answer should be NO MORE THAN{response                   max   length}WORDS.
+Answer: Delhi
+
+========== PDF PAGE 26 / 31 ==========
+                                    Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+
+
+
+Table 11.Retrieved documents and agent response of a multi-hop question example. “   ✓  ” and “/times” indicate supporting chunks and
+irrelevant chunks, respectively. Relevant tokens matched by BM25 are                                      highlighted.
+
+ Query                                                  Who is the wife of the man who produced the documentary of the pop star who influenced Beyonc         ´e?
+                                     Ψ-RAGὑ1(1st attempt: original query)                                                Ψ-RAGὑ1(2nd attempt:Who is the spouse of David Gest?)
+             /times1: “The Mistress” features... a married  man, whose    wife was played by...             ✓1: Liza and     David... featuringLiza Minnelliand her then-husband,           David   Gest.
+             /times2: Pizza Man is a 1991 comedy film    starring Bill Maher...                             ✓2: Michael Jackson: TheLife of an Icon... produced by his friend,             DavidGest...
+ BM25        /times3: Real Life is a 1979 American comedy film      starring Albert Brooks...               /times3: Dave Fennoy Fennoy in Phoenix, Arizona        David Henderson Fennoy...
+             /times4: No Escape is a 1936 British thriller film directed by...                              /times4: Chileab... was the second son of   David, King of Israel...
+            ✓  5: MichaelJackson: TheLifeofanIconisadocumentaryfilmaboutpop                                 /times5: RandomHeartsisa1999Americanromanticdramafilm... theirspouses
+             singer... produced by his friend,David Gest...                                                 were having an affair...
+ 1st        1: Beyonc´e’s music career, NBA players, American football, ...                                 1: DC Comics characters, superhero films, Marvel and DC comics, ...
+ layer       2: film characters, biographies of actors, musical fantasy comedies, ...                       2: cricket tournaments, FIFA Confederations Cup, ICC Champions Trophy, ...
+             3: DC Comics characters, superhero films, Marvel and DC comics, ...                            3: film characters, biographies of actors, musical fantasy comedies, ...
+ Last       1: Beyonc´e’s music career, R&B and pop genres, female empowerment, ...                         1: Swedish personalities, biographical accounts, historical figures, ...
+ abstract    2: show business families, celebrity siblings, marriages and spouses, ...                      2: Game of Thrones, Justice League, Aquaman, ...
+ layer       3: Beyonc´e’s solo career, music awards, Billboard charts, ...                                 3: European royalty, medieval history, noble families, ...
+             /times1: Beyonc  ´e’s work has influenced numerous artists...                                  /times1: Dave Fennoy Fennoy in Phoenix, Arizona...
+ Leaf        /times2: On March 30, 2015, it was announced that Beyonc  ´e is a co-owner...                  /times2: Gal Gadot - Varsano (Hebrew: ...
+ layer      ✓3: Beyonc    ´e namesMichael Jacksonas her major musical influence...                          /times3: Gal Gadot - Varsano (Hebrew: ...
+            ✓4: Michael Jackson: The Life of an Icon is a documentary film...                               /times4: Gal Gadot - Varsano (Hebrew: ...
+             /times5: Beyonc  ´e Giselle Knowles-Carter (/bi:­’jOnseI/ bee-YON-say)...                      /times5: Catharina Wallenstedt was the daughter of Bishop Laurentius...
+            ✓1: Michael Jackson: The Life of an Icon... [score:0.406]                                       ✓1: Liza and David... featuringLiza Minnelliand her then-husband, David Gest.
+ Final       /times2: Nine Days that Changed the World is a 2010 documentary... [score:0.101]               [score:0.980]
+ retrieved  ✓  3: Beyonc´enamesMichaelJacksonashermajormusicalinfluence... [score:                          ✓2: Michael Jackson: TheLife of an Icon... [score:0.201]
+ chunks      0.071]                                                                                         /times3: Gal Gadot - Varsano (Hebrew: ... [score:0.029]
+             /times4: Beyonc  ´e’s work has influenced numerous artists... [score:0.064]                    /times4: Gal Gadot - Varsano (Hebrew: ... [score:0.026]
+             /times5: Following the disbandment of Destiny  ´s Child... [score:0.038]                       /times5: Gal Gadot - Varsano (Hebrew: ... [score:0.020]
+            Accordingto“MichaelJackson: TheLifeofanIcon”,DavidGestisthefriend                               Accordingto“MichaelJackson: TheLifeofanIcon”... Lastly,IfoundthatLiza
+ Agent       and producerof thedocumentary filmabout popsinger MichaelJackson... Ineed                      Minnelli was the wife of David Gest at some point in time.
+ response    more information on who David Gest’s wife was at that time or if he had a wife.                <answer>Liza Minnelli✓
+             <retrieve>Who is the spouse of David Gest?
+
+
+
+
+
+
+Table12.An example ofminor class retrievalon MultiHop-RAG(S[:50]+E[:5]). The top-1summative abstractin each layeris listed.
+Redandpurpletext relate to the major class “Sports” and the minor class “Entertainment”, respectively.
+
+ Query                                                               What was the name of the tunnel where the fatal car crash occurred in The Crown?
+                                          RAPTOR (Sarthi et al.,2024)                                                                                Ψ-RAG/file-alt
+            Varioussportsteamsfaceoutcomes: Inter Miamieliminated,ItalyandAustralia                         The Crown’s finalseason covers Prince Charles and Camilla, Princess Diana, and
+ 1st         inDavis Cupfinal,RangersleadDiamondbacks3-1,LionsbeatPackers,49ers                             DodiFayed. Diana’sdeathand hersons’reactionsaredepicted. Separatestories
+ layer       defeatCowboys,VikingslosetoBroncosandBears,amidstother results and                             includeJadaPinkettSmithand WillSmith’s marriage, Mattel’sBarbiehonoring
+             controversies including Mattel’s inaccurate Cherokee Barbie.                                   Wilma Mankiller, and Dodi Fayed’s past engagement to Kelly Fisher.
+             InterMiamiloses1-0toFCCincinnati,eliminatingthem fromMLSplayoff                                SeasonsixfocusesonPrinceCharlesandCamilla, Princess DianaandDodi
+ 2nd         contention, despiteLionel Messi’s35-minute appearance off thebench, as Alvaro                  Fayed. AfterDiana’s1997death,WilliamwentmissingatBalmoral, returning14
+ layer       Barrealscoreslate,whileotherteamslikeManchesterUnitedstruggleinEurope                          hourslater. Beforeherdeath,Diana toldWilliamandHarry nottobelievepapers
+            with defensive issues and Chelsea’s Reece James faces an abusive conduct charge.                andplannedlifechanges,butaplannedmeetingneveroccurredduetoherfatal
+                                                                                                            car crash in Paris.
+             So,ourmistakescanneverhappenin theChampionsLeague,yougetpunished                               Inboththeseriesandinreal-life, Diana andDodi-alongwiththeirchauffeur,
+             forit,sowehavetolearnfromthat” However,AstonVillalegendGabby                                   HenriPaul- werekilledon31August1997whentheirMercedes-Benzwas
+ Leaf       AgbonlahorinsistsOnananeedstotakeasignificantchunkoftheblamefor                                 pursuedbypaparazziandcrashedinthePontdel’AlmatunnelinParisThe
+ layer       United’scollapseonWednesdaynight“IfeelsorryforOnana,”Agbonlahortold                            motheroftwowas36yearsoldThefatalcarcrashwasrecreatedintheveryfirst
+             talkSPORT“There’saclip ofhimthrowinghisglovestothegroundafterthe                               scene of season six
+             game He’s angry with himself
+            Theretrieveddocumentsonceagaindonotmentionanythingaboutatunnelora                               Toanswerthisuserquestion,Ineedtoidentifythelocationanddetails regarding
+             fatalcarcrashfrom“The Crown”. Theyarestilldiscussingfootball, specifically                     aspecificeventdepictedin“TheCrown”. Accordingtotheretrieveddocument,
+ Agent      Aston Villa andManchester United. Since Ihaverun outof retrieval attemptsand                    Diana,Dodi,theirchauffeurHenriPaulwereinvolvedina fatalcarcrash. This
+ response    the provided information does not answer the question.                                         incidentoccurredwhenthey werepursuedbypaparazziwhiledrivingthrough
+             <answer>Not mentioned/times                                                                    Paris. TheirMercedes-BenzcrashedinsidethePont del’Almatunnelon31
+                                                                                                            August 1997.
+                                                                                                            <answer>Pont de l’Alma✓
+
+
+
+
+
+                                                                                                   26
+
+========== PDF PAGE 27 / 31 ==========
+                                         Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+              the retriever, leading it to irrelevant chunks. In contrast, sparse retrieval can provide straightforward facts about David
+              Gestbysimplysearchingfordocumentswiththekeyword. Asaresult,theretrievedchunkleadstothefinalanswer“Liza
+              Minnelli”. Thisdemonstratestheimportanceofsynergybetween Ψ -RAG’shierarchicaltreeindexandthemulti-granular
+              hybrid retriever, the key to its effectiveness.
+
+              D.2. Analyses on Hierarchical Abstract Tree
+              Casestudy: retrievalonskeweddata.Tofurtherdemonstratetheimpactoftheuniformeffectanddistributionadaptability,
+              we conduct a case study based on the visualization study in Section4.2. We compare the agent response processing a
+              minor-classquestiononbothtreeindexesofRAPTORandΨ -RAG.FromTable12,the1stlayerabstractnodesofRAPTOR
+              are confused because of the uniform effect, with most of the contents related to the major class “Sports”. This significantly
+              interruptstheretrieverwhichselectsa majorclassabstractnodeinthe 2ndlayer. Onthe contrary,Ψ -RAG’s minor abstract
+              nodeatthe1stlayerclearlypointstotherelevanttopic“TheCrown”. Thisassiststheretrieverinfindingthecorrectchunk.
+
+              Table 13.Comparative results of the indexes. “SR”, “R&A”, and “Q3R”
+              refertothesparseretriever,theR&Aagent,andthereranker,specifically.
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                         Figure 11.Sensitivity of     Ψ  -RAG to the maximum
+                                                                                                         number of children per abstract node on MuSiQue.
+
+              Quantitativestudyon tree indexes.Weconduct aquantitative comparisonbetweenthe hierarchicalabstracttree (HAT)of
+              Ψ -RAG/file-altand(1)aflatindex,whichperformsbrute-forcesequentialsearchonalldocumentchunkswithO(n)        time;(2)
+              the GMM-based cluster tree of RAPTOR (Sarthi et al.,2024), both without and with the proposed multi-granular agentic
+              retriever modules. From Table13, we make the following observations:
+              (1)Flatdenseretrievalismuchslowerthantreeretrieval.Althoughdenseretrievalonaflatindexservesasaperformance
+              upperboundfortreeindexes,itslineartime complexityincursat least∼100×           higherruntimethanthelogarithmicretrieval
+              of tree indexes.
+              (2)HAToutperformstheGMMtreebothwithorwithouttheagenticretrievermodules.Theperformanceincrease
+              pointstotheminorclassdistributioninthedata,whichcharacterizesthecontributionofourtreeindextoalleviatingpoor
+              distribution adaptability.
+              Effect of rebalancing.We have set the maximum number of children per abstract node for the abstract tree. This keeps
+              the total abstract length within the context window of the abstraction agent. Figure11shows the sensitivity of             Ψ -RAG
+              to the rebalancing process after tree construction, which lead to three observations. (1) Rebalancing without excessive
+              splittinghelpsbuildabettertreestructurewithhigherperformance. (2)Splittinganabstractnodetoomanytimesmaylead
+              to relevant node missing duringtop-k  dense vector matching: settingmaximum #children to10 makes the F1lowerthan
+              that without rebalancing. (3) When the abstracts become too long (8k–16k tokens), their semantics become more vague
+              which also reduces the accuracy.
+
+              D.3. Analyses on Multi-granular Agentic Retriever
+              Maximumnumberofretrievalattempts.WeevaluatehowtheefficiencyandperformanceoftheR&Aagentvarywiththe
+              maximumnumberofiterativeretrievalattempts(imax   +1  ),asshowninFigure12. Theresultsindicatethatonmulti-hop
+              datasets, the first extra retriever call yields the greatest performance gain, while subsequent attempts contribute minimal or
+              even negative improvement. Each retrieval attempt introduces a relatively constant time overhead, and longer reasoning
+
+
+Index                                     Singleretrievaltime(s)     F1(%)              27
+                                 MuSiQue
+Flat                             33.39                          30.50
+GMM                       0.16                            17.17
+HAT                               0.15                          18.62(↑1.45)
+GMM+SR+R&A+Q3R1.17                            47.26
+HAT+SR+R&A+Q3R1.12                          48.90(↑1.64)
+                              MultiHop-RAG
+Flat                             62.21                          42.44
+GMM                       0.17                            35.81
+HAT                               0.16                          36.30(↑0.49)
+GMM+SR+R&A+Q3R0.66                            51.32
+HAT+SR+R&A+Q3R0.62                          56.23(↑4.91)
+
+========== PDF PAGE 28 / 31 ==========
+                          Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 12.Retrieval and QA performance in Recall@5 (R@5%) and F1 (%), and average processing time for each query (s) under
+concurrent execution,w.r.t.the maximum number of retrieval attempts.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                              Figure 13.False Rate and Not Mentioned Rate ofΨ-RAG on different datasets.
+
+
+chainstendtointroduceunnecessarynoise(Wuetal.,2025). Therefore,itiscrucialtostrikeabalancebetweenthecostof
+retrieval iterations and the performance gains across different application scenarios.
+
+D.4. Failure Analysis
+We analyze the failure cases ofΨ -RAG by measuring the False Rate (rate of incorrect answers) and Not Mentioned Rate
+(rateofretrievalfailures). Anincorrectanswer isdefinedassharingnooverlappingtokenswith the groundtruth. Figure13
+reveals the following key patterns:
+(1)Retrieval failures stem from multiple factors.Index scale is a primary factor: the Not Mentioned Rate for             ∞  -
+LongBook is significantly higher than that for NarrativeQA, which has an index only 30% the size on average.  This
+is because upper-level abstracts in a larger search space are coarser and introduce more noise. Another factor is query
+complexity: datasetswithhighermaximumhopcounts(MuSiQuewith4hops)exhibithigherNotMentionedRatesthan
+those with fewer hops (HotpotQA and 2Wiki with 2 hops). Although we increase the maximum retrieval attempts for
+complexquestions,weobservethatiftheinitialretrievalforareorganizedqueryfails,subsequentretrievalattemptsarealso
+highly likelyto fail. This isbecause the reorganized queryoften doesnot shift thehigh-level semantic focus, causingthe
+tree retriever to revisit the same abstract nodes. Meanwhile, the high-frequency entities in the reorganized query lead the
+sparseretrievertoreturnmanynoisychunks. AsshowninSectionD.1,BM25retrievesmanyirrelevantchunkswith“David”
+that are unrelated to the target “David Gest”.
+
+                                                                       28
+
+========== PDF PAGE 29 / 31 ==========
+                                            Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+               (2)TheFalseRateconsistentlyexceedstheNotMentionedRate.ThisoccursonmostdatasetsexcludingMultiHop-RAG
+               (with unanswerable negative samples). A manual analysis of 50 failure cases from L3-70B on MuSiQue identifies the
+                following causes: (i) LLM misguidance or guesses resulting from incomplete retrieval (29 cases); (ii) logical errors in
+                agentic reasoning(8 cases); (iii)LLM hallucination(6 cases); (iv) granularitymismatch between theanswer andthe ground
+                truth (7 cases). Therefore, the primary cause of a higher false rate is missing key document chunks in retrieval.
+
+                E. Real-World Extensions
+                E.1. Approximate Nearest Neighbor Search for Efficient Indexing
+               WeextendΨ -RAGwith twoefficient techniquesfor verylarge corporawith 10M+and even100M+ tokens. They include:
+
+                •  Bucketing: followingtheinverted-fileindexinFaiss(Douzeetal.,2025),wefirstpartitionalargecorpusintomultiple
+                   buckets using a fast recursive sphericalk -means. We then build a tree inside each bucket and finally merge them at the
+                   highestlayer. Assumingb≪n       bucketsofbalancedsize,bucketingreducestheaverageindexingtimecomplexityfrom
+                   O(n      2)toO(n           2/b)and space complexity fromO(n                    2)toO(n           2/b 2).
+
+                •  ANN search with HNSW(Malkov & Yashunin,2018): we build an HNSW graph over all chunk embeddings and use
+                   the top-k  graph neighbor pairs of each chunk, which are then ranked to build the tree. This reduces the average time
+                   complexity of similarity ranking fromO(n              2 logn)toO(knlogkn)and space complexity fromO(n                                               2)toO(kn).
+
+               We evaluate theefficiency ofthe twoextensionson twolarge subsetsfrom Wiki18 (∼ 3Btokens)in FlashRAG (Jinet al.,
+                2025c): Wiki18-6M(6.1M tokens,       ∼ 42k chunks)and Wiki18-50M (50.8M tokens,∼ 350k chunks). Thetime andmemory
+                costs are listed inTable14. It shows that HNSW cangenerate sorted document pairs for a corpus of50M tokens with less
+                than 1.5 GB of storage. Combined with bucketing, tree indexing can be completed with MB-level memory usage and at less
+                than 1% of the original time cost. Therefore, LLM-based abstraction becomes the primary efficiency bottleneckfor scaling
+                theframeworktoindustrialcorpora. ExploringefficientalternativestoLLM-basedabstractionwillbeakeydirectionforour
+                future work.
+
+               Table14.Timeandmemorycomparisonof     Ψ  -RAG’sextensionsonlarge-scaleWiki18subsets. Embeddingdimensionissetto1,024.
+                Experiments are conducted on 8 CPU cores (Wiki18-6M) / 64 CPU cores (Wiki18-50M) and 256GB Memory.
+
+
+
+
+
+
+
+
+
+
+
+
+                E.2. Query Hop Discriminator
+                Ourevaluation utilizesthemaximum hopcountof eachdataset forthemaximum numberofiterative retrieval timeimax   .
+                Thislimitstheapplicabilityinreal-worlddatasetswithdiverseuserqueries. For
+                practicalsettingswithoutpriormaximumhopcount,weimplementalightweight                                            Table 15.Multi-hop QA results of     Ψ  -
+                query hopdiscriminatorQ:q7→i           max    using a2-layer MLPtrained onquestions                             RAG with the query hop discriminator.
+               with 1 to 4 hops.  It predicts the hops of each user query before retrieval to
+                automatically decide the maximum retrieval time for the R&A agent with very
+                smalllatency. Table15showstheQA resultswith        Q  onsome multi-hopdatasets6.
+                Results indicate that the query hop discriminator preserves strong effectiveness of
+               Ψ-RAG without the prior maximum hop count.
+
+                    6We trainQwith user questions from datasets other than the indexed corpus: NQ, 2Wiki, MultiHop-RAG without negative samples,
+                andMuSiQueforindexingHotpotQA(HotpotQAforindexingMuSiQue). Thelengthsofdecomposedsub-querylistsorthenumberof
+                evidence passages serve as labels.
+
+                                                                                               29
+
+Data                                                                             Wiki18-6M                                                                     Wiki18-50M
+Method                               VanillaΨ-RAG    +HNSW                   +Bucketing(b=4)+HNSW           +HNSW        +Bucketing(b=63)+HNSW
+Embeddingtime(s)         1,229Dataset         R@5(%)    F1(%)                                               10,208
+Similarityrankingtime(s) 304.84             55.99(5.44×)         0.89(342.5×)HotpotQA95.05       74.27      168.02        7.87(21.35×)
+Similaritymatrixmemory13.16GB          10.55MB(1,277×)  2.45MB(5,483×)MuSiQue72.68       46.63              88.17MB   2.15MB(41.01×)
+Similarityrankingmemory65.81GB          656.7MB(102.6×)  37.89MB(1,778×)                                    1.34GB     34.10MB(40.24×)
+Treeindexingtime(s)      15,996             13,957(1.15×)       848(18.86×)                                 ∼280,000   2,261(∼124×)
+Abstractiontime(s)       ∼205,000     ∼200,000           ∼89,400                                            ∼1,800,000 ∼1,400,000
+
+========== PDF PAGE 30 / 31 ==========
+                          Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+F. Related Work
+Retrieval-Augmented Generation(Lewis et al.,2020;Fan et al.,2024). Based on the type of index and retriever, RAG
+frameworkscanbecategorizedas: (1)Sparseretrieval: methodssuchasTF-IDF(SparckJones,1972)andBM25(Robertson
+et al.,2009) retrieve documents where keywords from the user question appear more often in the corpus. They are fast and
+suitablefortoken-leveldetailedsearchbutlesscapableofcapturingdeepsemanticmeanings. (2)Densevectorretrieval
+(Karpukhinetal.,2020): thisapproachutilizespowerfullanguageembeddingmodels(Khattab&Zaharia,2020;Izacard
+et al.,2022;Lee et al.,2025;Zhang et al.,2025b) to map queries and documents into a continuous vector space (Fan
+et al.,2024). It retrieves the top-           k  documents most relevant to the user question using vector metrics like cosine similarity.
+Sometimes, embedding-based rerankers (Li et al.,2023;Zhang et al.,2025b) are alsoutilized to rerank retrieved documents
+basedonuserpreference,furtherimprovingretrievalquality. Densevector-basedRAGexcelsatcapturingdeepsemantics
+and key features of entities, making it suitable for more complex QA scenarios. Nonetheless, dense retrieval could prefer
+documents highly relevant in features but totally unrelated to target entities. (3)Hybrid retrieval: some approaches integrate
+both sparseand dense retrievalto combine theirstrengths, leading to anumber of powerful RAG frameworks(Gao et al.,
+2021;Lee et al.,2023;Arivazhagan et al.,2023;Zhang et al.,2024b).
+Agentic RAG.The rapid advancement in the intelligence of LLMs has heightened focus on their reasoning capabilities
+and demandson RAGframeworks. Recentefforts (Yaoet al.,2022;Trivediet al.,2023;Asaiet al.,2024;Liet al.,2025c)
+incorporate specifically designed LLM agents to integrate retrieval into LLM reasoning process. Specifically, the agent
+recursivelydecomposesaquestionintomultiplesub-questionsandinvokes theretrieverateachstep (Lietal.,2025d). This
+enables the LLMto autonomously and flexibly handlemulti-hop questions. However,most of them are built upon flattened
+linear or inverted indexes for token-level information.
+Graph-RAG.As themost popular formof structuredRAG, knowledge graph indexes (Edge etal.,2024;Peng et al.,2025;
+Xiao et al.,2025) can capture semantic relationships between document chunks or entities. They often build a unified
+index for an entire corpus using named entity recognition and extraction methods like the Open Information Extraction
+(OpenIE) (Banko et al.,2007). Cross-document multi-hop associations are then captured by walking from node to node
+(Jim ´enez Guti´errez et al.,2024;2025), extracting shortest paths (Huang et al.,2025;Chen et al.,2026), or extracting
+subgraphs (Guo et al.,2025;Li et al.,2025a). However, graph indexes are less effective at capturing hierarchy. Some
+Graph-RAG methods have to resort to less efficient compensatory strategies to handle summative tasks, including but not
+limitedtohierarchicalgraphs(Malkov&Yashunin,2018;Huangetal.,2025),communitysummaries(Edgeetal.,2024;
+Wanget al.,2025), LLM-basedhierarchical filtering (Guo etal.,2025), or graphneural network-based messageaggregation
+(Zhangetal.,2025a). CoupledwiththesignificantoverheadofOpenIE,efficientindexconstructionremainsakeychallenge
+for Graph-RAG.
+Tree-RAG.Tree indexes are introduced to explicitly model the hierarchicalrelationships of documents while achieving fast
+retrievalwith logarithmic complexity (Liu,2022). Traditional treeindexesfor nearest neighborsearch include top-down
+splitting (Bentley,1975;Omohundro,1989) and bottom-up hierarchical clustering (Florek et al.,1951;Sokal & Michener,
+1958;Jardine & van Rijsbergen,1971). However, traditionalalgorithms offer limited generalization. Most existing dense
+vector-based Tree-RAG methods (Liu et al.,2021;Liu,2022;Jin etal.,2025b;Zhao etal.,2025;Fatehkiaet al.,2024;Tao
+et al.,2025) rely on explicit document structure (session titles, tables of contents, etc.) or contextual relationships between
+adjacenttextchunks. Asaresult,theyarenotdirectlyapplicabletodocumentslackingexplicitstructureortocross-document
+retrieval. RAPTOR (Sarthi et al.,2024) is the first passage-level Tree-RAG framework designed for unstructured long
+documents. It recursively clusters document chunks via Gaussian Mixture Model (GMM) and generates a summary for
+each cluster. MemTree (Rezazadeh et al.,2025) further adapts Tree-RAG to the long-term LLM memory scenario, but
+bothofthemarelimitedtothepassage-levelindexesandthesingle-documentretrievalsetting. Toourknowledge,theonly
+corpus-level Tree-RAG is LATTICE (Gupta et al.,2025), which performs beam search retrieval using an LLM-evaluated
+path relevance score. However, there are no discussions towards the limitations on multi-hop QA, and its tree building
+process is not open-sourced at the time of writing.
+
+G. Discussion and Future Work
+
+Updating the index.Real-time document insertion and index updates are common requirements for RAG applications,
+yet they pose challenges for traditional Tree-RAG methods, as adding new documents necessitates re-clustering the entire
+corpus. Our abstract tree index is constructed based on local pairwise similarities, making it feasible to be updated with new
+documents.
+
+                                                                        30
+
+========== PDF PAGE 31 / 31 ==========
+                          Hierarchical Abstract Tree for Cross-Document Retrieval-Augmented Generation
+
+Weproposeaneasy-to-implementapproachfortheinsertionof∆n     newdocumentchunks. Asinglenewnodeiscollapsed
+totheleaflayerbysearchingforitsmostsimilarleafinthetreeviadensevectormatching. Then,forkeywordabstracts,
+Ψ -RAG traverses upstream to find the parent abstract nodes of the new node (or maintains anO(n)        parent index table
+for faster lookups) and appends new keywords to each parent. For summative abstracts, the abstraction LLM is invoked
+to regenerate the abstract for each parent node, similar to existing abstract updating strategies (Rezazadeh et al.,2025).
+ThiscostsuptoO(n∆n)              time. Forbatchinsertionof∆n     chunks,atreecanfirstbebuiltwithonlynewchunksandthen
+integrated into the main branch via abstract node collapse. If it is collapsed into the lth layer with n l nodes, then this
+updating costsO((∆n)                      2n llog∆n)which is much smaller than that of re-indexing.
+We note that repeatedly inserting isolated nodes under the same parent may amplify the semantic or granularity biases
+betweenthem. Consideringthesemanticcoherenceinthereal-worldtextualdata,wethusrecommendinsertingnewcontents
+as a subtree rather than as individual nodes when they differ substantially from the existing tree.
+Future work.An efficiency challenge for      Ψ -RAG and other passage-level Tree-RAG lies in the abstraction LLM calls
+during indexing. Developing a more efficient abstraction scheme is a key direction for scaling Tree-RAG to industrial
+applications.  Moreover, as analyzed in SectionD.4, sparse retrievers like BM25 resort to the traditional named entity
+recognitiontechnique,neglectingthehighco-occurrencefrequencyofnamedentities. Anotherfutureworkinvolvesadapting
+agents to more specialized and diverse user needs with various post-training techniques, such as reinforcement learning and
+rejection sampling-based supervised fine-tuning.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                        31
